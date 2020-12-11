@@ -35,7 +35,7 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * OAuth2 Service component data holder
+ * OAuth2 Service component data holder.
  */
 public class OAuth2ServiceComponentHolder {
 
@@ -64,7 +64,7 @@ public class OAuth2ServiceComponentHolder {
     }
 
     /**
-     * Get Application management service
+     * Get Application management service.
      *
      * @return ApplicationManagementService
      */
@@ -74,7 +74,7 @@ public class OAuth2ServiceComponentHolder {
     }
 
     /**
-     * Set Application management service
+     * Set Application management service.
      *
      * @param applicationMgtService ApplicationManagementService
      */
@@ -147,7 +147,7 @@ public class OAuth2ServiceComponentHolder {
     }
 
     /**
-     * Get ClaimProvider Service
+     * Get ClaimProvider Service.
      *
      * @return all ID token claims
      */
@@ -156,7 +156,7 @@ public class OAuth2ServiceComponentHolder {
     }
 
     /**
-     * Set ClaimProvider Service
+     * Set ClaimProvider Service.
      *
      * @param claimProvider
      */
@@ -166,7 +166,7 @@ public class OAuth2ServiceComponentHolder {
     }
 
     /**
-     * Unregister the particular claimProvider
+     * Unregister the particular claimProvider.
      *
      * @param claimProvider
      */
