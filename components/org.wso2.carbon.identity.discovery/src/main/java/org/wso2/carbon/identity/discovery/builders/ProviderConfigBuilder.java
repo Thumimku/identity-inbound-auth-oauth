@@ -18,7 +18,6 @@
 
 package org.wso2.carbon.identity.discovery.builders;
 
-
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.wso2.carbon.base.ServerConfigurationException;
@@ -39,6 +38,8 @@ import java.util.List;
 import java.util.Set;
 
 import static org.wso2.carbon.identity.discovery.DiscoveryUtil.isUseEntityIdAsIssuerInOidcDiscovery;
+import static org.wso2.carbon.identity.oauth2.device.constants.Constants.DEVICE_FLOW_GRANT_TYPE;
+import static org.wso2.carbon.identity.oauth2.util.OAuth2Util.buildServiceUrl;
 
 /**
  * ProviderConfigBuilder builds the OIDProviderConfigResponse
@@ -53,11 +54,13 @@ public class ProviderConfigBuilder {
     public OIDProviderConfigResponse buildOIDProviderConfig(OIDProviderRequest request) throws
             OIDCDiscoveryEndPointException, ServerConfigurationException {
         OIDProviderConfigResponse providerConfig = new OIDProviderConfigResponse();
+        String tenantDomain = request.getTenantDomain();
         if (isUseEntityIdAsIssuerInOidcDiscovery()) {
             try {
-                providerConfig.setIssuer(OAuth2Util.getIdTokenIssuer(request.getTenantDomain()));
+                providerConfig.setIssuer(OAuth2Util.getIdTokenIssuer(tenantDomain));
             } catch (IdentityOAuth2Exception e) {
-                throw new ServerConfigurationException("Error while retrieving OIDC Id token issue", e);
+                throw new ServerConfigurationException(String.format("Error while retrieving OIDC Id token issuer " +
+                        "value for tenant domain: %s", tenantDomain), e);
             }
         } else {
             providerConfig.setIssuer(OAuth2Util.getIDTokenIssuer());
@@ -69,22 +72,22 @@ public class ProviderConfigBuilder {
         providerConfig.setRevocationEndpointAuthMethodsSupported(OAuth2Util.getSupportedClientAuthenticationMethods()
                 .toArray(new String[0]));
         providerConfig.setResponseModesSupported(OAuth2Util.getSupportedResponseModes().toArray(new String[0]));
-        providerConfig.setIntrospectionEndpoint(OAuth2Util.OAuthURL.getOAuth2IntrospectionEPUrl());
         providerConfig.setIntrospectionEndpointAuthMethodsSupported(OAuth2Util.getSupportedClientAuthenticationMethods()
                 .toArray(new String[0]));
         providerConfig.setCodeChallengeMethodsSupported(OAuth2Util.getSupportedCodeChallengeMethods()
                 .toArray(new String[0]));
         try {
-            providerConfig.setRegistrationEndpoint(OAuth2Util.OAuthURL.getOAuth2DCREPUrl(request.getTenantDomain()));
-            providerConfig.setJwksUri(OAuth2Util.OAuthURL.getOAuth2JWKSPageUrl(request.getTenantDomain()));
+            providerConfig.setIntrospectionEndpoint(OAuth2Util.OAuthURL.getOAuth2IntrospectionEPUrl(tenantDomain));
+            providerConfig.setRegistrationEndpoint(OAuth2Util.OAuthURL.getOAuth2DCREPUrl(tenantDomain));
+            providerConfig.setJwksUri(OAuth2Util.OAuthURL.getOAuth2JWKSPageUrl(tenantDomain));
         } catch (URISyntaxException e) {
             throw new ServerConfigurationException("Error while building tenant specific url", e);
         }
-        List<String> scopes = OAuth2Util.getOIDCScopes(request.getTenantDomain());
+        List<String> scopes = OAuth2Util.getOIDCScopes(tenantDomain);
         providerConfig.setScopesSupported(scopes.toArray(new String[scopes.size()]));
         try {
             List<ExternalClaim> claims = OIDCDiscoveryDataHolder.getInstance().getClaimManagementService()
-                    .getExternalClaims(OIDC_CLAIM_DIALECT, request.getTenantDomain());
+                    .getExternalClaims(OIDC_CLAIM_DIALECT, tenantDomain);
             String[] claimArray = new String[claims.size() + 2];
             int i;
             for (i = 0; i < claims.size(); i++) {
@@ -108,12 +111,12 @@ public class ProviderConfigBuilder {
         providerConfig.setResponseTypesSupported(supportedResponseTypeNames.toArray(new
                 String[supportedResponseTypeNames.size()]));
 
-        providerConfig.setSubjectTypesSupported(new String[]{"pairwise"});
+        providerConfig.setSubjectTypesSupported(new String[]{"public"});
 
-        providerConfig.setCheckSessionIframe(IdentityUtil.getProperty(
-                IdentityConstants.OAuth.OIDC_CHECK_SESSION_EP_URL));
-        providerConfig.setEndSessionEndpoint(IdentityUtil.getProperty(
-                IdentityConstants.OAuth.OIDC_LOGOUT_EP_URL));
+        providerConfig.setCheckSessionIframe(buildServiceUrl(IdentityConstants.OAuth.CHECK_SESSION,
+                IdentityUtil.getProperty(IdentityConstants.OAuth.OIDC_CHECK_SESSION_EP_URL)));
+        providerConfig.setEndSessionEndpoint(buildServiceUrl(IdentityConstants.OAuth.LOGOUT,
+                IdentityUtil.getProperty(IdentityConstants.OAuth.OIDC_LOGOUT_EP_URL)));
 
         try {
             providerConfig.setUserinfoSigningAlgValuesSupported(new String[] {
@@ -134,6 +137,9 @@ public class ProviderConfigBuilder {
         providerConfig.setBackchannelLogoutSupported(Boolean.TRUE);
         providerConfig.setBackchannelLogoutSessionSupported(Boolean.TRUE);
 
+        if (OAuth2Util.getSupportedGrantTypes().contains(DEVICE_FLOW_GRANT_TYPE)) {
+            providerConfig.setDeviceAuthorizationEndpoint(OAuth2Util.OAuthURL.getDeviceAuthzEPUrl());
+        }
         return providerConfig;
     }
 }

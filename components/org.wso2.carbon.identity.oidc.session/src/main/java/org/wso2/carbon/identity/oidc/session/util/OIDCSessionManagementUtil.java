@@ -18,14 +18,25 @@
 
 package org.wso2.carbon.identity.oidc.session.util;
 
+import com.nimbusds.jose.JOSEException;
+import com.nimbusds.jose.crypto.RSADecrypter;
+import com.nimbusds.jwt.EncryptedJWT;
+import com.nimbusds.jwt.JWT;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.wso2.carbon.base.MultitenantConstants;
 import org.wso2.carbon.core.SameSiteCookie;
 import org.wso2.carbon.core.ServletCookie;
+import org.wso2.carbon.core.util.KeyStoreManager;
+import org.wso2.carbon.identity.application.authentication.framework.context.SessionContext;
+import org.wso2.carbon.identity.application.authentication.framework.util.FrameworkConstants;
+import org.wso2.carbon.identity.application.authentication.framework.util.FrameworkUtils;
+import org.wso2.carbon.identity.core.util.IdentityTenantUtil;
 import org.wso2.carbon.identity.core.util.IdentityUtil;
 import org.wso2.carbon.identity.oauth.common.OAuthConstants;
 import org.wso2.carbon.identity.oauth.config.OAuthServerConfiguration;
+import org.wso2.carbon.identity.oauth2.IdentityOAuth2Exception;
 import org.wso2.carbon.identity.oauth2.util.OAuth2Util;
 import org.wso2.carbon.identity.oidc.session.DefaultOIDCSessionStateManager;
 import org.wso2.carbon.identity.oidc.session.OIDCSessionConstants;
@@ -37,6 +48,8 @@ import java.io.UnsupportedEncodingException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLEncoder;
+import java.security.interfaces.RSAPrivateKey;
+import java.text.ParseException;
 
 import javax.servlet.http.Cookie;
 import javax.servlet.http.HttpServletRequest;
@@ -50,6 +63,8 @@ public class OIDCSessionManagementUtil {
     private static final String RANDOM_ALG_SHA1 = "SHA1PRNG";
     private static final String DIGEST_ALG_SHA256 = "SHA-256";
     private static final String OIDC_SESSION_STATE_MANAGER_CONFIG = "OAuth.OIDCSessionStateManager";
+    private static final String ALLOW_ADDITIONAL_PARAMS_FROM_POST_LOGOUT_REDIRECT_URI = "OAuth" +
+            ".OpenIDConnect.AllowAdditionalParamsFromPostLogoutRedirectURI";
 
     private static final OIDCSessionManager sessionManager = new OIDCSessionManager();
     private static OIDCSessionStateManager oidcSessionStateManager;
@@ -166,6 +181,42 @@ public class OIDCSessionManagementUtil {
     }
 
     /**
+     * Adds the browser state cookie with tenant qualified path to the response.
+     *
+     * @param response
+     * @param request
+     * @param loginTenantDomain
+     * @param sessionContextIdentifier
+     * @return Cookie
+     */
+    public static Cookie addOPBrowserStateCookie(HttpServletResponse response, HttpServletRequest request,
+                                                 String loginTenantDomain, String sessionContextIdentifier) {
+
+        SessionContext sessionContext = FrameworkUtils.getSessionContextFromCache(sessionContextIdentifier,
+                loginTenantDomain);
+        if (sessionContext != null) {
+            Object opbsValue = sessionContext.getProperty(OIDCSessionConstants.OPBS_COOKIE_ID);
+            if (opbsValue != null) {
+                return getOIDCessionStateManager().addOPBrowserStateCookie(response, request,
+                        loginTenantDomain, (String) opbsValue);
+            }
+        }
+        return getOIDCessionStateManager().addOPBrowserStateCookie(response, request,
+                loginTenantDomain, generateOPBrowserStateCookieValue(loginTenantDomain));
+    }
+
+    /**
+     * Generate OPBrowserState Cookie Value.
+     *
+     * @param tenantDomain
+     * @return
+     */
+    public static String generateOPBrowserStateCookieValue(String tenantDomain) {
+
+        return getOIDCessionStateManager().generateOPBrowserStateCookieValue(tenantDomain);
+    }
+
+    /**
      * Invalidate the browser state cookie.
      *
      * @param request
@@ -181,7 +232,18 @@ public class OIDCSessionManagementUtil {
                     ServletCookie servletCookie = new ServletCookie(cookie.getName(), cookie.getValue());
                     servletCookie.setMaxAge(0);
                     servletCookie.setSecure(true);
-                    servletCookie.setPath("/");
+
+                    if (IdentityTenantUtil.isTenantedSessionsEnabled()) {
+                        // check whether the opbs cookie has a tenanted path.
+                        if (cookie.getValue().endsWith(OIDCSessionConstants.TENANT_QUALIFIED_OPBS_COOKIE_SUFFIX)) {
+                            String tenantDomain = resolveTenantDomain(request);
+                            servletCookie.setPath(FrameworkConstants.TENANT_CONTEXT_PREFIX + tenantDomain + "/");
+                        } else {
+                            servletCookie.setPath("/");
+                        }
+                    } else {
+                        servletCookie.setPath("/");
+                    }
                     servletCookie.setSameSite(SameSiteCookie.NONE);
                     response.addCookie(servletCookie);
                     return cookie;
@@ -190,6 +252,21 @@ public class OIDCSessionManagementUtil {
         }
 
         return null;
+    }
+
+    /**
+     * Resolve the user login tenant domain.
+     *
+     * @param request
+     * @return tenantDomain
+     */
+    private static String resolveTenantDomain(HttpServletRequest request) {
+
+        String tenantDomain = request.getParameter(FrameworkConstants.RequestParams.LOGIN_TENANT_DOMAIN);
+        if (StringUtils.isBlank(tenantDomain)) {
+            return IdentityTenantUtil.getTenantDomainFromContext();
+        }
+        return tenantDomain;
     }
 
     /**
@@ -218,13 +295,8 @@ public class OIDCSessionManagementUtil {
      */
     public static String getOIDCLogoutConsentURL() {
 
-        String oidcLogoutConsentPageUrl = OIDCSessionManagementConfiguration.getInstance()
-                .getOIDCLogoutConsentPageUrl();
-        if (StringUtils.isBlank(oidcLogoutConsentPageUrl)) {
-            oidcLogoutConsentPageUrl =
-                    IdentityUtil.getServerURL("/authenticationendpoint/oauth2_logout_consent.do", false, false);
-        }
-        return oidcLogoutConsentPageUrl;
+        return OAuth2Util.buildServiceUrl(OAuthConstants.OAuth20Endpoints.OIDC_LOGOUT_CONSENT_EP_URL,
+                OIDCSessionManagementConfiguration.getInstance().getOIDCLogoutConsentPageUrl());
     }
 
     /**
@@ -234,12 +306,8 @@ public class OIDCSessionManagementUtil {
      */
     public static String getOIDCLogoutURL() {
 
-        String oidcLogoutPageUrl = OIDCSessionManagementConfiguration.getInstance().getOIDCLogoutPageUrl();
-        if (StringUtils.isBlank(oidcLogoutPageUrl)) {
-            oidcLogoutPageUrl =
-                    IdentityUtil.getServerURL("/authenticationendpoint/oauth2_logout.do", false, false);
-        }
-        return oidcLogoutPageUrl;
+        return OAuth2Util.buildServiceUrl(OAuthConstants.OAuth20Endpoints.OIDC_DEFAULT_LOGOUT_RESPONSE_URL,
+                OIDCSessionManagementConfiguration.getInstance().getOIDCLogoutPageUrl());
     }
 
     /**
@@ -251,11 +319,7 @@ public class OIDCSessionManagementUtil {
      */
     public static String getErrorPageURL(String errorCode, String errorMessage) {
 
-        String errorPageUrl = OAuthServerConfiguration.getInstance().getOauth2ErrorPageUrl();
-        if (StringUtils.isBlank(errorPageUrl)) {
-            errorPageUrl = IdentityUtil.getServerURL("/authenticationendpoint/oauth2_error.do", false, false);
-        }
-
+        String errorPageUrl = OAuth2Util.OAuthURL.getOAuth2ErrorPageUrl();
         try {
             errorPageUrl += "?" + OAuthConstants.OAUTH_ERROR_CODE + "=" + URLEncoder.encode(errorCode, "UTF-8") + "&"
                     + OAuthConstants.OAUTH_ERROR_MESSAGE + "=" + URLEncoder.encode(errorMessage, "UTF-8");
@@ -326,4 +390,90 @@ public class OIDCSessionManagementUtil {
 
         return OIDCSessionManagementConfiguration.getInstance().handleAlreadyLoggedOutSessionsGracefully();
     }
+
+    /**
+     * Decrypt the encrypted id token (JWE) using RSA algorithm.
+     *
+     * @param tenantDomain Tenant domain.
+     * @param idToken      Id token.
+     * @return Decrypted JWT.
+     */
+    public static JWT decryptWithRSA(String tenantDomain, String idToken) throws IdentityOAuth2Exception {
+
+        int tenantId = IdentityTenantUtil.getTenantId(tenantDomain);
+        RSAPrivateKey privateKey;
+        KeyStoreManager keyStoreManager = KeyStoreManager.getInstance(tenantId);
+
+        try {
+            if (!tenantDomain.equals(MultitenantConstants.SUPER_TENANT_DOMAIN_NAME)) {
+                String ksName = tenantDomain.trim().replace(".", "-");
+                String jksName = ksName + ".jks";
+                privateKey = (RSAPrivateKey) keyStoreManager.getPrivateKey(jksName, tenantDomain);
+            } else {
+                privateKey = (RSAPrivateKey) keyStoreManager.getDefaultPrivateKey();
+            }
+            EncryptedJWT encryptedJWT = EncryptedJWT.parse(idToken);
+            RSADecrypter decrypter = new RSADecrypter(privateKey);
+            encryptedJWT.decrypt(decrypter);
+            return encryptedJWT;
+        } catch (ParseException | JOSEException e) {
+            throw new IdentityOAuth2Exception("Error occurred while decrypting the JWE.", e);
+        } catch (Exception e) {
+            throw new IdentityOAuth2Exception("Error occurred while retrieving private key for decryption.", e);
+        }
+    }
+
+    /**
+     * Extract client ID from the decrypted ID token.
+     *
+     * @param decryptedIDToken Decrypted ID token.
+     * @return Client ID.
+     * @throws ParseException Error in retrieving the JWT claim set.
+     */
+    public static String extractClientIDFromDecryptedIDToken(JWT decryptedIDToken) throws ParseException {
+
+        /*
+        Based in the OpenId spec, decryptedIDToken is suppose to be a signedJWT.
+        However here for the sake of backward compatibility we are ignoring this,
+        as there are clients who send encrypted claimSet.
+        */
+        String clientId = (String) decryptedIDToken.getJWTClaimsSet().getClaims()
+                .get(OIDCSessionConstants.OIDC_ID_TOKEN_AZP_CLAIM);
+        if (StringUtils.isBlank(clientId)) {
+            clientId = decryptedIDToken.getJWTClaimsSet().getAudience().get(0);
+            log.info("Provided ID Token does not contain azp claim with client ID. Hence client ID is extracted " +
+                    "from the aud claim in the ID Token.");
+        }
+
+        return clientId;
+    }
+
+    /**
+     * Return true if the id token is encrypted.
+     *
+     * @param idToken String ID token.
+     * @return Boolean state of encryption.
+     */
+    public static boolean isIDTokenEncrypted(String idToken) {
+        // Encrypted ID token contains 5 base64 encoded components separated by periods.
+        return StringUtils.countMatches(idToken, ".") == 4;
+    }
+
+    /**
+     * Method to retrieve the <AllowAdditionalParamsFromPostLogoutRedirectURI> config from the OAuth Configuration.
+     *
+     * @return Retrieved config (true or false)
+     */
+    public static boolean isAllowAdditionalParamsFromPostLogoutRedirectURIEnabled() {
+
+        String isAllowAdditionalParamsFromPostLogoutRedirectURIEnabled =
+                IdentityUtil.getProperty(ALLOW_ADDITIONAL_PARAMS_FROM_POST_LOGOUT_REDIRECT_URI);
+
+        if (StringUtils.isNotBlank(isAllowAdditionalParamsFromPostLogoutRedirectURIEnabled)) {
+            return Boolean.parseBoolean(isAllowAdditionalParamsFromPostLogoutRedirectURIEnabled);
+        } else {
+            return true;
+        }
+    }
+
 }

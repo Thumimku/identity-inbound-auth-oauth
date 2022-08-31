@@ -66,7 +66,9 @@
     boolean pkceMandatory = false;
     boolean pkceSupportPlain = false;
     boolean bypassClientCredentials = false;
-    
+    boolean isTokenBindingValidationEnabled = false;
+    boolean isTokenRevocationWithIDPSessionTerminationEnabled = false;
+
     if (request.getParameter("pkce") != null) {
         pkceMandatory = true;
     }
@@ -77,6 +79,14 @@
     
     if (request.getParameter("bypass_client_credentials") != null) {
         bypassClientCredentials = true;
+    }
+
+    if (request.getParameter("validateTokenBindingEnabled") != null) {
+        isTokenBindingValidationEnabled = true;
+    }
+
+    if (request.getParameter("revokeTokensWhenIDPSessionTerminated") != null) {
+        isTokenRevocationWithIDPSessionTerminationEnabled = true;
     }
     
     String tokenBindingType = request.getParameter("accessTokenBindingType");
@@ -159,6 +169,8 @@
             app.setPkceMandatory(pkceMandatory);
             app.setPkceSupportPlain(pkceSupportPlain);
             app.setBypassClientCredentials(bypassClientCredentials);
+            app.setTokenRevocationWithIDPSessionTerminationEnabled(isTokenRevocationWithIDPSessionTerminationEnabled);
+            app.setTokenBindingValidationEnabled(isTokenBindingValidationEnabled);
             if (StringUtils.isNotBlank(tokenBindingType)) {
                 app.setTokenBindingType(tokenBindingType);
             }

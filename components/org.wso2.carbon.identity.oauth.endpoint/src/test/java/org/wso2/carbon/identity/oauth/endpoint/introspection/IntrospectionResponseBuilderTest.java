@@ -19,10 +19,18 @@ package org.wso2.carbon.identity.oauth.endpoint.introspection;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
+import org.mockito.Mock;
+import org.powermock.api.mockito.PowerMockito;
+import org.powermock.core.classloader.annotations.PrepareForTest;
 import org.testng.annotations.BeforeTest;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
+import org.wso2.carbon.base.CarbonBaseConstants;
+import org.wso2.carbon.identity.oauth.common.OAuthConstants;
+import org.wso2.carbon.identity.oauth.config.OAuthServerConfiguration;
+import org.wso2.carbon.identity.testutil.powermock.PowerMockIdentityBaseTest;
 
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -35,17 +43,27 @@ import static org.testng.Assert.assertTrue;
 /**
  * This class does unit test coverage for RecoveryConfigImpl class
  */
-public class IntrospectionResponseBuilderTest {
+@PrepareForTest({OAuthServerConfiguration.class})
+public class IntrospectionResponseBuilderTest extends PowerMockIdentityBaseTest {
 
     private IntrospectionResponseBuilder introspectionResponseBuilder1;
 
     private IntrospectionResponseBuilder introspectionResponseBuilder2;
+
+    @Mock
+    OAuthServerConfiguration oAuthServerConfiguration;
+    List<String> filteredIntrospectionClaims = new ArrayList<>();
 
     @BeforeTest
     public void setUp() {
 
         introspectionResponseBuilder1 = new IntrospectionResponseBuilder();
         introspectionResponseBuilder2 = new IntrospectionResponseBuilder();
+
+        System.setProperty(
+                CarbonBaseConstants.CARBON_HOME,
+                Paths.get(System.getProperty("user.dir"), "src", "test", "resources").toString()
+        );
     }
 
     @DataProvider(name = "provideBuilderData")
@@ -74,6 +92,8 @@ public class IntrospectionResponseBuilderTest {
                 "YvQYi7uqEtzWf6wgDv5sJq2UIQRC4OJGjn_fTqftIWerZc7rIMRYXi7jzuHxX_GabUhuj7m1iRzi1wgxbI9yQn825lDVF4Lt9" +
                 "DMUTBfKLk81KIy6uB_ECtyxumoX3372yRgC7R56_L_hAElflgBsclEUwEH9psE";
 
+        mockOAuthServerConfiguration(filteredIntrospectionClaims);
+
         introspectionResponseBuilder1.setActive(isActive);
         introspectionResponseBuilder1.setIssuedAt(1452170176);
         introspectionResponseBuilder1.setJwtId(idToken);
@@ -88,6 +108,7 @@ public class IntrospectionResponseBuilderTest {
         introspectionResponseBuilder1.setClientId("rgfKVdnMQnJSSr_pKFTxj3apiwYa");
         introspectionResponseBuilder1.setErrorCode("Invalid input");
         introspectionResponseBuilder1.setErrorDescription("error_discription");
+        introspectionResponseBuilder1.setAuthorizedUserType(OAuthConstants.UserType.APPLICATION_USER);
 
         JSONObject jsonObject = new JSONObject(introspectionResponseBuilder1.build());
 
@@ -113,6 +134,8 @@ public class IntrospectionResponseBuilderTest {
                 "ERROR messages are not equal");
         assertEquals(jsonObject.get(IntrospectionResponse.Error.ERROR_DESCRIPTION), "error_discription",
                 "ERROR_DESCRIPTION messages are not equal");
+        assertEquals(jsonObject.get(IntrospectionResponse.AUT), "APPLICATION_USER",
+                "AUT values are not equal");
     }
 
     /**
@@ -120,6 +143,8 @@ public class IntrospectionResponseBuilderTest {
      */
     @Test
     public void testResposeBuilderWithoutVal() {
+
+        mockOAuthServerConfiguration(filteredIntrospectionClaims);
 
         introspectionResponseBuilder2.setActive(false);
         introspectionResponseBuilder2.setIssuedAt(0);
@@ -135,6 +160,7 @@ public class IntrospectionResponseBuilderTest {
         introspectionResponseBuilder2.setClientId("");
         introspectionResponseBuilder2.setErrorCode("");
         introspectionResponseBuilder2.setErrorDescription("");
+        introspectionResponseBuilder2.setAuthorizedUserType("");
 
         JSONObject jsonObject2 = new JSONObject(introspectionResponseBuilder2.build());
         assertFalse(jsonObject2.has(IntrospectionResponse.EXP), "EXP already exists in the response builder");
@@ -153,6 +179,7 @@ public class IntrospectionResponseBuilderTest {
         assertFalse(jsonObject2.has(IntrospectionResponse.Error.ERROR), "ERROR already exists in the response builder");
         assertFalse(jsonObject2.has(IntrospectionResponse.Error.ERROR_DESCRIPTION),
                 "ERROR_DESCRIPTION already exists in the response builder");
+        assertFalse(jsonObject2.has(IntrospectionResponse.AUT), "AUT already exists in the response builder");
     }
 
     @Test(dependsOnMethods = "testResposeBuilderWithVal")
@@ -160,6 +187,8 @@ public class IntrospectionResponseBuilderTest {
 
         Map<String, Object> additionalData = new HashMap<>();
         List<Map<String, Object>> permissions = new ArrayList<>();
+
+        mockOAuthServerConfiguration(filteredIntrospectionClaims);
 
         Map<String, Object> resource1 = new HashMap<>();
         String resourceIdKey = "resource_id";
@@ -195,5 +224,88 @@ public class IntrospectionResponseBuilderTest {
         assertTrue(resourceEntry.has(resourceIdKey), resourceIdKey + " key not found in introspection response.");
         assertTrue(resourceEntry.has(resourceScopesKey), resourceScopesKey + " key not found in introspection " +
                 "response.");
+    }
+
+    /**
+     * This method does unit test for build response with username as a filtered values
+     */
+    @Test (priority = 1)
+    public void testResponseBuilderWithFilteredUsernameClaims() {
+
+        String idToken = "eyJhbGciOiJSUzI1NiJ9.eyJhdXRoX3RpbWUiOjE0NTIxNzAxNzYsImV4cCI6MTQ1MjE3Mzc3Niwic3ViI" +
+                "joidXNlQGNhcmJvbi5zdXBlciIsImF6cCI6IjF5TDFfZnpuekdZdXRYNWdCMDNMNnRYR3lqZ2EiLCJhdF9oYXNoI" +
+                "joiWWljbDFlNTI5WlhZOE9zVDlvM3ktdyIsImF1ZCI6WyIxeUwxX2Z6bnpHWXV0WDVnQjAzTDZ0WEd5amdhIl0s" +
+                "ImlzcyI6Imh0dHBzOlwvXC9sb2NhbGhvc3Q6OTQ0M1wvb2F1dGgyXC90b2tlbiIsImlhdCI6MTQ1MjE3MDE3Nn0.RqAgm0ybe7tQ" +
+                "YvQYi7uqEtzWf6wgDv5sJq2UIQRC4OJGjn_fTqftIWerZc7rIMRYXi7jzuHxX_GabUhuj7m1iRzi1wgxbI9yQn825lDVF4Lt9" +
+                "DMUTBfKLk81KIy6uB_ECtyxumoX3372yRgC7R56_L_hAElflgBsclEUwEH9psE";
+
+        introspectionResponseBuilder1.setActive(true);
+        introspectionResponseBuilder1.setIssuedAt(1452170176);
+        introspectionResponseBuilder1.setJwtId(idToken);
+        introspectionResponseBuilder1.setSubject("admin@carbon.super");
+        introspectionResponseBuilder1.setExpiration(7343678);
+        introspectionResponseBuilder1.setUsername("admin@carbon.super");
+        introspectionResponseBuilder1.setTokenType("Bearer");
+        introspectionResponseBuilder1.setNotBefore(1452173776);
+        introspectionResponseBuilder1.setAudience("1yL1_fznzGYutX5gB03L6tXGyjga");
+        introspectionResponseBuilder1.setIssuer("https:\\/\\/localhost:9443\\/oauth2\\/token");
+        introspectionResponseBuilder1.setScope("test");
+        introspectionResponseBuilder1.setClientId("rgfKVdnMQnJSSr_pKFTxj3apiwYa");
+        introspectionResponseBuilder1.setErrorCode("Invalid input");
+        introspectionResponseBuilder1.setErrorDescription("error_discription");
+
+        List<String> filteredIntrospectionClaims = new ArrayList<>();
+        filteredIntrospectionClaims.add(IntrospectionResponse.USERNAME);
+        mockOAuthServerConfiguration(filteredIntrospectionClaims);
+
+        JSONObject jsonObject = new JSONObject(introspectionResponseBuilder1.build());
+        assertFalse(jsonObject.has(IntrospectionResponse.USERNAME));
+    }
+
+    /**
+     * This method does unit test for build response with few filtered claim values
+     */
+    @Test (priority = 1)
+    public void testResponseBuilderWithFilteredClaims() {
+
+        String idToken = "eyJhbGciOiJSUzI1NiJ9.eyJhdXRoX3RpbWUiOjE0NTIxNzAxNzYsImV4cCI6MTQ1MjE3Mzc3Niwic3ViI" +
+                "joidXNlQGNhcmJvbi5zdXBlciIsImF6cCI6IjF5TDFfZnpuekdZdXRYNWdCMDNMNnRYR3lqZ2EiLCJhdF9oYXNoI" +
+                "joiWWljbDFlNTI5WlhZOE9zVDlvM3ktdyIsImF1ZCI6WyIxeUwxX2Z6bnpHWXV0WDVnQjAzTDZ0WEd5amdhIl0s" +
+                "ImlzcyI6Imh0dHBzOlwvXC9sb2NhbGhvc3Q6OTQ0M1wvb2F1dGgyXC90b2tlbiIsImlhdCI6MTQ1MjE3MDE3Nn0.RqAgm0ybe7tQ" +
+                "YvQYi7uqEtzWf6wgDv5sJq2UIQRC4OJGjn_fTqftIWerZc7rIMRYXi7jzuHxX_GabUhuj7m1iRzi1wgxbI9yQn825lDVF4Lt9" +
+                "DMUTBfKLk81KIy6uB_ECtyxumoX3372yRgC7R56_L_hAElflgBsclEUwEH9psE";
+
+        List<String> filteredIntrospectionClaims = new ArrayList<>();
+        filteredIntrospectionClaims.add(IntrospectionResponse.SCOPE);
+        filteredIntrospectionClaims.add(IntrospectionResponse.NBF);
+        mockOAuthServerConfiguration(filteredIntrospectionClaims);
+
+        introspectionResponseBuilder1.setActive(true);
+        introspectionResponseBuilder1.setIssuedAt(1452170176);
+        introspectionResponseBuilder1.setJwtId(idToken);
+        introspectionResponseBuilder1.setSubject("admin@carbon.super");
+        introspectionResponseBuilder1.setExpiration(7343678);
+        introspectionResponseBuilder1.setUsername("admin@carbon.super");
+        introspectionResponseBuilder1.setTokenType("Bearer");
+        introspectionResponseBuilder1.setNotBefore(1452173776);
+        introspectionResponseBuilder1.setAudience("1yL1_fznzGYutX5gB03L6tXGyjga");
+        introspectionResponseBuilder1.setIssuer("https:\\/\\/localhost:9443\\/oauth2\\/token");
+        introspectionResponseBuilder1.setScope("test");
+        introspectionResponseBuilder1.setClientId("rgfKVdnMQnJSSr_pKFTxj3apiwYa");
+        introspectionResponseBuilder1.setErrorCode("Invalid input");
+        introspectionResponseBuilder1.setErrorDescription("error_discription");
+
+        JSONObject jsonObject = new JSONObject(introspectionResponseBuilder1.build());
+        assertTrue(jsonObject.has(IntrospectionResponse.AUD));
+        assertFalse(jsonObject.has(IntrospectionResponse.SCOPE));
+        assertFalse(jsonObject.has(IntrospectionResponse.NBF));
+    }
+
+    private void mockOAuthServerConfiguration(List<String> filteredIntrospectionClaims) {
+
+        PowerMockito.mockStatic(OAuthServerConfiguration.class);
+        PowerMockito.when(OAuthServerConfiguration.getInstance()).thenReturn(oAuthServerConfiguration);
+        PowerMockito.when(oAuthServerConfiguration.getFilteredIntrospectionClaims())
+                .thenReturn(filteredIntrospectionClaims);
     }
 }

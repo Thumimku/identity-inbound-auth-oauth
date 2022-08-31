@@ -21,7 +21,7 @@ package org.wso2.carbon.identity.oauth2.token.handlers.grant.saml;
 import com.google.gdata.util.common.base.Charsets;
 import org.apache.commons.codec.binary.Base64;
 import org.joda.time.DateTime;
-import org.junit.runner.RunWith;
+import org.mockito.ArgumentMatchers;
 import org.mockito.Matchers;
 import org.mockito.Mock;
 import org.opensaml.saml.saml2.core.Assertion;
@@ -37,8 +37,8 @@ import org.opensaml.xmlsec.signature.support.SignatureValidator;
 import org.powermock.api.mockito.PowerMockito;
 import org.powermock.core.classloader.annotations.PowerMockIgnore;
 import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.modules.junit4.PowerMockRunner;
 import org.testng.annotations.BeforeMethod;
+import org.testng.annotations.BeforeTest;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 import org.wso2.carbon.base.CarbonBaseConstants;
@@ -84,6 +84,7 @@ import org.wso2.carbon.user.core.UserRealm;
 import org.wso2.carbon.user.core.UserStoreManager;
 import org.wso2.carbon.user.core.service.RealmService;
 import org.wso2.carbon.user.core.tenant.TenantManager;
+import org.wso2.carbon.utils.CarbonUtils;
 import org.wso2.carbon.utils.multitenancy.MultitenantUtils;
 
 import java.lang.reflect.Field;
@@ -93,6 +94,7 @@ import java.security.cert.X509Certificate;
 import java.util.HashMap;
 import java.util.Map;
 
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Matchers.any;
 import static org.mockito.Matchers.anyBoolean;
 import static org.mockito.Matchers.anyInt;
@@ -109,11 +111,11 @@ import static org.testng.Assert.fail;
  * tests for SAML2BearerGrantHandler
  */
 @PowerMockIgnore({"javax.net.*", "javax.xml.*", "org.w3c.*", "org.xml.*"})
-@RunWith(PowerMockRunner.class)
 @PrepareForTest({IdentityUtil.class, IdentityTenantUtil.class, IdentityProviderManager.class, MultitenantUtils.class,
         IdentityApplicationManagementUtil.class, OAuthServerConfiguration.class, SSOServiceProviderConfigManager.class,
         SAML2BearerGrantHandler.class, OAuthComponentServiceHolder.class, OAuth2ServiceComponentHolder.class,
-        OAuth2Util.class, IdentityPersistenceManager.class, SignatureValidator.class, UnmarshallUtils.class})
+        OAuth2Util.class, IdentityPersistenceManager.class, SignatureValidator.class, UnmarshallUtils.class,
+        CarbonUtils.class})
 public class SAML2BearerGrantHandlerTest extends PowerMockIdentityBaseTest {
 
     public static final String[] SCOPE_ARRAY = {"scope1"};
@@ -156,13 +158,18 @@ public class SAML2BearerGrantHandlerTest extends PowerMockIdentityBaseTest {
     @Mock
     private IdentityPersistenceManager identityPersistenceManager;
 
-    @BeforeMethod
-    public void setUp() throws Exception {
+    @BeforeTest
+    public void setCarbonHome() throws Exception {
 
         System.setProperty(
                 CarbonBaseConstants.CARBON_HOME,
                 Paths.get(System.getProperty("user.dir"), "src", "test", "resources").toString()
-        );
+                          );
+    }
+
+    @BeforeMethod
+    public void setUp() throws Exception {
+
         mockStatic(OAuthServerConfiguration.class);
         mockStatic(IdentityUtil.class);
         mockStatic(UnmarshallUtils.class);
@@ -283,7 +290,6 @@ public class SAML2BearerGrantHandlerTest extends PowerMockIdentityBaseTest {
         when(userRealm.getUserStoreManager()).thenReturn(userStoreManager);
         when(userStoreManager.isExistingUser(anyString())).thenReturn(isUserExist);
 
-
         if (e instanceof IdentityProviderManagementException) {
             when(identityProviderManager.getIdPByAuthenticatorPropertyValue(anyString(), anyString(), anyString(),
                     anyString(), anyBoolean())).thenThrow(e);
@@ -291,12 +297,11 @@ public class SAML2BearerGrantHandlerTest extends PowerMockIdentityBaseTest {
             when(UnmarshallUtils.unmarshall(anyString())).thenThrow(e);
         } else if (e instanceof SignatureException) {
             PowerMockito.mockStatic(SignatureValidator.class);
-            PowerMockito.doThrow(e)
-                    .when(SignatureValidator.class,  "validate", Matchers.any(Signature.class),
-                            Matchers.any(X509Credential.class));
+            PowerMockito.doThrow(e).when(SignatureValidator.class,  "validate", nullable(Signature.class),
+                    any(X509Credential.class));
         } else if (e instanceof IdentityApplicationManagementException) {
-            when(applicationManagementService.getServiceProviderByClientId(anyString(), anyString(), anyString()))
-                    .thenThrow(e);
+            when(applicationManagementService.getServiceProviderByClientId(nullable(String.class), anyString(),
+                    anyString())).thenThrow(e);
         } else if (e instanceof UserStoreException) {
             when(realmService.getTenantUserRealm(anyInt())).thenThrow(e);
         } else if (e instanceof CertificateException) {
@@ -421,7 +426,7 @@ public class SAML2BearerGrantHandlerTest extends PowerMockIdentityBaseTest {
         when(oAuthComponentServiceHolder.getRealmService()).thenReturn(realmService);
         mockStatic(OAuth2ServiceComponentHolder.class);
         when(OAuth2ServiceComponentHolder.getApplicationMgtService()).thenReturn(applicationManagementService);
-        when(applicationManagementService.getServiceProviderByClientId(anyString(), anyString(), anyString()))
+        when(applicationManagementService.getServiceProviderByClientId(nullable(String.class), anyString(), anyString()))
                 .thenReturn(serviceProvider);
     }
 
@@ -433,6 +438,7 @@ public class SAML2BearerGrantHandlerTest extends PowerMockIdentityBaseTest {
         IdentityProvider identityProvider = new IdentityProvider();
         identityProvider.setIdentityProviderName(name);
         identityProvider.setAlias(alias);
+        identityProvider.setCertificate("[{\"thumbPrint\":\"\",\"certValue\":\"\"}]");
         return identityProvider;
     }
 
@@ -514,6 +520,7 @@ public class SAML2BearerGrantHandlerTest extends PowerMockIdentityBaseTest {
     }
 
     private void prepareForGetSAMLSSOServiceProvider() throws Exception {
+
         when(tenantManager.getTenantId(anyString())).thenReturn(-1234);
         when(realmService.getTenantManager()).thenReturn(tenantManager);
         mockStatic(OAuthComponentServiceHolder.class);

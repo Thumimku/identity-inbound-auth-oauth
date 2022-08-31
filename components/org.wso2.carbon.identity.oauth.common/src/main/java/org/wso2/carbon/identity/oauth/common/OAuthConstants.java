@@ -18,6 +18,9 @@
 
 package org.wso2.carbon.identity.oauth.common;
 
+import java.util.Arrays;
+import java.util.List;
+
 /**
  * This class define OAuth related constants.
  */
@@ -31,11 +34,15 @@ public final class OAuthConstants {
     //OAuth2 request headers.
     public static final String HTTP_REQ_HEADER_AUTHZ = "Authorization";
     public static final String HTTP_REQ_HEADER_AUTH_METHOD_BASIC = "Basic";
+    public static final List<String> ALLOWED_CONTENT_TYPES = Arrays.asList("application/x-www-form-urlencoded",
+                                                                           "application/json");
 
     // OAuth2 response headers
     public static final String HTTP_RESP_HEADER_CACHE_CONTROL = "Cache-Control";
     public static final String HTTP_RESP_HEADER_PRAGMA = "Pragma";
     public static final String HTTP_RESP_HEADER_AUTHENTICATE = "WWW-Authenticate";
+    public static final String HTTP_RESP_CONTENT_TYPE_JSON = "application/json";
+    public static final String HTTP_RESP_CONTENT_TYPE_JWT = "application/jwt";
 
     // OAuth2 response header values
     public static final String HTTP_RESP_HEADER_VAL_CACHE_CONTROL_NO_STORE = "no-store";
@@ -118,6 +125,10 @@ public final class OAuthConstants {
     //Constants used for OAuth/OpenID Connect Configuration UI
     public static final String CALLBACK_URL_REGEXP_PREFIX = "regexp=";
 
+
+    public static final String LOOPBACK_IP_REGEX = "(.*127\\.0\\.0\\.1.*|.*\\[::1].*)";
+    public static final String LOOPBACK_IP_PORT_REGEX = "(?<=127\\.0\\.0\\.1|\\[::1])(:[0-9]{1,5})";
+
     public static final String AUTHORIZATION_CODE_STORE_TABLE = "IDN_OAUTH2_AUTHORIZATION_CODE";
 
     //Constants used for OAuth Secret Revoke and Regeneration
@@ -143,6 +154,12 @@ public final class OAuthConstants {
     //Oauth2 sp expire time configuration.
     public static final String TOKEN_EXPIRE_TIME_RESOURCE_PATH = "/identity/config/spTokenExpireTime";
 
+    //AccessTokenDO context property name
+    public static final String ACCESS_TOKEN_DO = "AccessTokenDO";
+
+    //JWT claim for authorized user type
+    public static final String AUTHORIZED_USER_TYPE = "aut";
+
     private OAuthConstants() {
 
     }
@@ -158,7 +175,9 @@ public final class OAuthConstants {
         public static final String IWA_NTLM = "iwa:ntlm";
         public static final String PASSWORD = "password";
         public static final String AUTHORIZATION_CODE = "authorization_code";
+        public static final String JWT_BEARER = "urn:ietf:params:oauth:grant-type:jwt-bearer";
         public static final String REFRESH_TOKEN = "refresh_token";
+        public static final String DEVICE_CODE = "device_code";
 
         private GrantTypes() {
 
@@ -214,7 +233,10 @@ public final class OAuthConstants {
         public static final String USERINFO = "userinfo";
         public static final String CLIENT_ID = "client_id";
         public static final String REDIRECT_URI = "redirect_uri";
+        public static final String REQUEST_URI = "request_uri";
         public static final String STATE = "state";
+        public static final String RESPONSE_TYPE = "response_type";
+        public static final String REQUEST = "request";
 
         private OAuth20Params() {
 
@@ -244,6 +266,9 @@ public final class OAuthConstants {
         public static final String ACCESS_TOKEN_URL = "/access-token";
         public static final String REQUEST_TOKEN_URL = "/request-token";
         public static final String AUTHORIZE_TOKEN_URL = "/authorize-token";
+        public static final String OAUTH_TOKEN_EP_URL = "oauth/access-token";
+        public static final String OAUTH_AUTHZ_EP_URL = "oauth/authorize-url";
+        public static final String OAUTH_REQUEST_TOKEN_EP_URL = "oauth/request-token";
 
         private OAuth10AEndpoints() {
 
@@ -257,6 +282,21 @@ public final class OAuthConstants {
 
         public static final String OAUTH20_ACCESS_TOKEN_URL = "/token";
         public static final String OAUTH20_AUTHORIZE_TOKEN_URL = "/authorize";
+        public static final String OAUTH2_AUTHZ_EP_URL = "oauth2/authorize";
+        public static final String OAUTH2_TOKEN_EP_URL = "oauth2/token";
+        public static final String OAUTH2_DCR_EP_URL = "/api/identity/oauth2/dcr/v1.0/register";
+        public static final String OAUTH2_JWKS_EP_URL = "/oauth2/jwks";
+        public static final String  OAUTH2_DISCOVERY_EP_URL = "/oauth2/oidcdiscovery";
+        public static final String OAUTH2_USER_INFO_EP_URL = "oauth2/userinfo";
+        public static final String OAUTH2_REVOKE_EP_URL = "oauth2/revoke";
+        public static final String OIDC_WEB_FINGER_EP_URL = ".well-know/webfinger";
+        public static final String OAUTH2_INTROSPECT_EP_URL = "oauth2/introspect";
+        public static final String OIDC_CONSENT_EP_URL = "/authenticationendpoint/oauth2_consent.do";
+        public static final String OAUTH2_CONSENT_EP_URL = "/authenticationendpoint/oauth2_authz.do";
+        public static final String OAUTH2_ERROR_EP_URL = "/authenticationendpoint/oauth2_error.do";
+        public static final String OIDC_DEFAULT_LOGOUT_RESPONSE_URL = "/authenticationendpoint/oauth2_logout.do";
+        public static final String OIDC_LOGOUT_CONSENT_EP_URL = "/authenticationendpoint/oauth2_logout_consent.do";
+        public static final String DEVICE_AUTHZ_EP_URL = "oauth2/device_authorize";
 
         private OAuth20Endpoints() {
 
@@ -362,6 +402,7 @@ public final class OAuthConstants {
      */
     public static class UserType {
 
+        public static final String USER_TYPE = "USER_TYPE";
         public static final String APPLICATION = "APPLICATION";
         public static final String APPLICATION_USER = "APPLICATION_USER";
         public static final String FEDERATED_USER_DOMAIN_PREFIX = "FEDERATED";
@@ -383,6 +424,7 @@ public final class OAuthConstants {
         public static final String PHONE_NUMBER_VERIFIED = "phone_number_verified";
         public static final String EMAIL_VERIFIED = "email_verified";
         public static final String ADDRESS = "address";
+        public static final String ROLES = "roles";
         public static final String CUSTOM = "custom";
         public static final String AZP = "azp";
         public static final String AUTH_TIME = "auth_time";
@@ -396,6 +438,9 @@ public final class OAuthConstants {
         public static final String REALM = "realm";
         public static final String TENANT = "tenant";
         public static final String USERSTORE = "userstore";
+        public static final String IDP_SESSION_KEY = "isk";
+        // JWT Token signer tenant key sent in realm claim.
+        public static final String SIGNING_TENANT = "signing_tenant";
 
         private OIDCClaims() {
 
@@ -420,6 +465,10 @@ public final class OAuthConstants {
         public static final String BYPASS_CLIENT_CREDENTIALS = "bypassClientCredentials";
         public static final String RENEW_REFRESH_TOKEN = "renewRefreshToken";
         public static final String TOKEN_BINDING_TYPE = "tokenBindingType";
+        public static final String TOKEN_REVOCATION_WITH_IDP_SESSION_TERMINATION =
+                "tokenRevocationWithIDPSessionTermination";
+        public static final String TOKEN_BINDING_VALIDATION = "tokenBindingValidation";
+        public static final String TOKEN_BINDING_TYPE_NONE = "None";
 
         private OIDCConfigProperties() {
 
@@ -456,5 +505,15 @@ public final class OAuthConstants {
     public static class TokenBindings {
 
         public static final String NONE = "NONE";
+    }
+
+    /**
+     * Define logging constants.
+     */
+    public static class LogConstants {
+
+        public static final String OAUTH_INBOUND_SERVICE = "oauth-inbound-service";
+        public static final String FAILED = "FAILED";
+        public static final String SUCCESS = "SUCCESS";
     }
 }

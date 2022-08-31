@@ -18,14 +18,18 @@
 
 package org.wso2.carbon.identity.oauth2.token.handlers.grant.saml;
 
+import org.apache.axis2.context.ConfigurationContext;
 import org.apache.commons.codec.binary.Base64;
 import org.apache.commons.lang.StringUtils;
 import org.joda.time.DateTime;
+import org.mockito.Mock;
 import org.opensaml.saml.security.impl.SAMLSignatureProfileValidator;
+import org.powermock.core.classloader.annotations.PrepareForTest;
 import org.powermock.reflect.internal.WhiteboxImpl;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
+import org.wso2.carbon.base.CarbonBaseConstants;
 import org.wso2.carbon.base.MultitenantConstants;
 import org.wso2.carbon.base.api.ServerConfigurationService;
 import org.wso2.carbon.core.internal.CarbonCoreDataHolder;
@@ -34,6 +38,8 @@ import org.wso2.carbon.identity.common.testng.WithAxisConfiguration;
 import org.wso2.carbon.identity.common.testng.WithCarbonHome;
 import org.wso2.carbon.identity.common.testng.WithH2Database;
 import org.wso2.carbon.identity.common.testng.WithRealmService;
+import org.wso2.carbon.identity.core.internal.IdentityCoreServiceComponent;
+import org.wso2.carbon.identity.core.util.IdentityTenantUtil;
 import org.wso2.carbon.identity.core.util.IdentityUtil;
 import org.wso2.carbon.identity.oauth2.TestConstants;
 import org.wso2.carbon.identity.oauth2.dto.OAuth2AccessTokenReqDTO;
@@ -43,10 +49,13 @@ import org.wso2.carbon.identity.saml.common.util.SAMLInitializer;
 import org.wso2.carbon.identity.testutil.powermock.PowerMockIdentityBaseTest;
 import org.wso2.carbon.idp.mgt.internal.IdpMgtServiceComponentHolder;
 import org.wso2.carbon.registry.core.service.RegistryService;
+import org.wso2.carbon.user.api.RealmConfiguration;
 import org.wso2.carbon.user.core.service.RealmService;
 import org.wso2.carbon.user.core.tenant.TenantManager;
+import org.wso2.carbon.utils.ConfigurationContextService;
 
 import java.io.ByteArrayInputStream;
+import java.nio.file.Paths;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.util.HashMap;
@@ -57,6 +66,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.powermock.api.mockito.PowerMockito.mockStatic;
 import static org.testng.Assert.assertTrue;
 import static org.testng.AssertJUnit.assertEquals;
 
@@ -64,6 +74,7 @@ import static org.testng.AssertJUnit.assertEquals;
 @WithH2Database(files = {"dbScripts/idp.sql"})
 @WithAxisConfiguration
 @WithRealmService(tenantDomain = TestConstants.TENANT_DOMAIN, initUserStoreManager = true)
+@PrepareForTest({ConfigurationContextService.class, IdentityCoreServiceComponent.class})
 public class SAML1BearerGrantHandlerTest extends PowerMockIdentityBaseTest {
 
     private SAML1BearerGrantHandler saml1BearerGrantHandler;
@@ -144,8 +155,25 @@ public class SAML1BearerGrantHandlerTest extends PowerMockIdentityBaseTest {
                     "    </ds:Signature>" +
                     "  </saml:Assertion>";
 
+    @Mock
+    private ConfigurationContextService mockConfigurationContextService;
+    @Mock
+    private ConfigurationContext mockConfigurationContext;
+    @Mock
+    private RealmConfiguration realmConfiguration;
+
     @BeforeMethod
     public void setUp() throws Exception {
+        
+        System.setProperty(
+                CarbonBaseConstants.CARBON_HOME,
+                Paths.get(System.getProperty("user.dir"), "src", "test", "resources").toString()
+                          );
+
+        mockStatic(IdentityCoreServiceComponent.class);
+        when(IdentityCoreServiceComponent.getConfigurationContextService()).thenReturn(mockConfigurationContextService);
+        when(mockConfigurationContextService.getServerConfigContext()).thenReturn(mockConfigurationContext);
+
         saml1BearerGrantHandler = new SAML1BearerGrantHandler();
     }
 
@@ -178,6 +206,7 @@ public class SAML1BearerGrantHandlerTest extends PowerMockIdentityBaseTest {
     @Test(dataProvider = "BuildAssertion")
     public void testValidateGrant(String assertion, boolean enableAudienceRestriction, boolean expectedResult)
             throws Exception {
+
         OAuthTokenReqMessageContext oAuthTokenReqMessageContext = buildOAuth2AccessTokenReqDTO();
         RequestParameter[] requestParameters = new RequestParameter[] {new RequestParameter("assertion",
                 Base64.encodeBase64String(assertion.getBytes()))};
@@ -195,6 +224,8 @@ public class SAML1BearerGrantHandlerTest extends PowerMockIdentityBaseTest {
         when(tenantManager.getTenantId(TestConstants.CARBON_TENANT_DOMAIN)).thenReturn(MultitenantConstants.
                 SUPER_TENANT_ID);
         IdpMgtServiceComponentHolder.getInstance().setRealmService(realmService);
+        IdentityTenantUtil.setRealmService(realmService);
+        when(realmService.getBootstrapRealmConfiguration()).thenReturn(realmConfiguration);
         KeyStoreManager keyStoreManager = mock(KeyStoreManager.class);
         ConcurrentHashMap<String, KeyStoreManager> mtKeyStoreManagers = new ConcurrentHashMap();
         mtKeyStoreManagers.put("-1234", keyStoreManager);
@@ -204,6 +235,9 @@ public class SAML1BearerGrantHandlerTest extends PowerMockIdentityBaseTest {
         when(keyStoreManager.getDefaultPrimaryCertificate()).thenReturn(cert);
         Map<String, Object> configuration = new HashMap<>();
         configuration.put("SSOService.EntityId", "LOCAL");
+        configuration.put("SSOService.SAMLECPEndpoint", "https://localhost:9443/samlecp");
+        configuration.put("SSOService.ArtifactResolutionEndpoint", "https://localhost:9443/samlartresolve");
+        configuration.put("OAuth.OpenIDConnect.IDTokenIssuerID", "https://localhost:9443/oauth2/token");
         WhiteboxImpl.setInternalState(IdentityUtil.class, "configuration", configuration);
         saml1BearerGrantHandler.profileValidator = new SAMLSignatureProfileValidator();
         assertEquals(saml1BearerGrantHandler.validateGrant(oAuthTokenReqMessageContext), expectedResult);

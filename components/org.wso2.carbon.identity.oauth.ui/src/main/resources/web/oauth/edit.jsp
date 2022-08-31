@@ -95,7 +95,7 @@
         supportedIdTokenEncryptionMethods =
                 client.getSupportedIDTokenAlgorithms().getSupportedIdTokenEncryptionMethods();
         supportedTokenBindingsMetaData = client.getSupportedTokenBindingsMetaData();
-
+        
         if (consumerkey != null) {
             app = client.getOAuthApplicationData(consumerkey);
         } else {
@@ -282,10 +282,12 @@
                     var versionValue = document.getElementsByName("oauthVersion")[0].value;
 
                     if (versionValue === '<%= OAuthConstants.OAuthVersions.VERSION_2%>') {
+                        <%  if (allowedGrants.contains("refresh_token")) { %>
                         if (!$(jQuery("#grant_refresh_token"))[0].checked) {
                             document.getElementById("renewRefreshTokenPerApp").checked = true;
                             document.getElementById("renewRefreshTokenPerApp").value = 'notAssigned';
                         }
+                        <%  } %>
 
                         if (!$(jQuery("#grant_authorization_code"))[0].checked && !$(jQuery("#grant_implicit"))[0].checked) {
                             document.getElementsByName("callback")[0].value = '';
@@ -368,6 +370,8 @@
                         $(jQuery('#bypass_client_credentials').hide());
                         $('#accessTokenBindingType_none').prop('checked', true);
                         $("#bindAccessToken").hide();
+                        $(jQuery('#validateTokenBindingEnabled').hide());
+                        $(jQuery('#revokeTokensWhenIDPSessionTerminated').hide());
 
                     } else if (oauthVersion === "<%=OAuthConstants.OAuthVersions.VERSION_2%>") {
 
@@ -453,6 +457,8 @@
                         } else {
                             $('#bindAccessToken').hide();
                         }
+                        $(jQuery('#validateTokenBindingEnabled').show());
+                        $(jQuery('#revokeTokensWhenIDPSessionTerminated').show());
                     }
                 }
 
@@ -740,6 +746,9 @@
                                     </td>
                                     <td><input class="text-box-big" id="callback" name="callback"
                                                type="text" value="<%=Encode.forHtmlAttribute(app.getCallbackUrl())%>"/>
+                                        <div class="sectionHelp">
+                                            <fmt:message key='callback.url.hint'/>
+                                        </div>
                                     </td>
                                 </tr>
                                 <tr id="pkce_enable">
@@ -830,6 +839,32 @@
                                                 }
                                             %>
                                         </table>
+                                    </td>
+                                </tr>
+                                <tr id="validateTokenBindingEnabled">
+                                    <td colspan="2">
+                                        <label>
+                                            <input type="checkbox" name="validateTokenBindingEnabled"
+                                                   value="yes" <%=(
+                                                           app.getTokenBindingValidationEnabled() ? "checked" : "")%> />
+                                            <fmt:message key='token.binding.validation.enabled'/>
+                                        </label>
+                                        <div class="sectionHelp">
+                                            <fmt:message key='token.binding.validation.enabled.hint'/>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <tr id="revokeTokensWhenIDPSessionTerminated">
+                                    <td colspan="2">
+                                        <label>
+                                            <input type="checkbox" name="revokeTokensWhenIDPSessionTerminated"
+                                                   value="yes" <%=(
+                                                           app.getTokenRevocationWithIDPSessionTerminationEnabled() ? "checked" : "")%> />
+                                            <fmt:message key='revoke.tokens.when.idp.session.terminated'/>
+                                        </label>
+                                        <div class="sectionHelp">
+                                            <fmt:message key='revoke.tokens.when.idp.session.terminated.hint'/>
+                                        </div>
                                     </td>
                                 </tr>
                                 <tr id="userAccessTokenPlain">

@@ -35,11 +35,14 @@ import static org.wso2.carbon.identity.oauth.dcr.util.DCRConstants.APP_NAME_VALI
 /**
  * Util class used for OAuth DCRM.
  */
+@Deprecated
 public class DCRMUtils {
 
     private static final Log log = LogFactory.getLog(DCRMUtils.class);
     private static Pattern spNameRegexPattern = null;
     private static final String SERVICE_PROVIDERS_NAME_REGEX = "ServiceProviders.SPNameRegex";
+    private static final String APPLICATION_ROLE_PERMISSION_REQUIRED =
+            "OAuth.DCRM.ApplicationRolePermissionRequiredToView";
 
     public static boolean isRedirectionUriValid(String redirectUri) {
 
@@ -48,7 +51,9 @@ public class DCRMUtils {
         }
 
         if (IdentityUtil.isBlank(redirectUri)) {
-            log.error("The redirection URI is either null or blank.");
+            if (log.isDebugEnabled()) {
+                log.debug("The redirection URI is either null or blank.");
+            }
             return false;
         }
 
@@ -196,5 +201,17 @@ public class DCRMUtils {
             spValidatorRegex = APP_NAME_VALIDATING_REGEX;
         }
         return spValidatorRegex;
+    }
+
+    /**
+     * To get the config value for application role permission requirement.
+     *
+     * @return Application role permission required or not.
+     */
+    public static boolean isApplicationRolePermissionRequired() {
+
+        String isApplicationRolePermissionRequired = IdentityUtil.getProperty(APPLICATION_ROLE_PERMISSION_REQUIRED);
+        return StringUtils.isEmpty(isApplicationRolePermissionRequired) || Boolean.parseBoolean(
+                isApplicationRolePermissionRequired);
     }
 }

@@ -18,6 +18,9 @@
 
 package org.wso2.carbon.identity.oauth2.internal;
 
+import org.apache.axiom.om.OMElement;
+import org.apache.axiom.om.impl.builder.StAXOMBuilder;
+import org.apache.commons.lang.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.osgi.framework.BundleContext;
@@ -28,42 +31,72 @@ import org.osgi.service.component.annotations.Reference;
 import org.osgi.service.component.annotations.ReferenceCardinality;
 import org.osgi.service.component.annotations.ReferencePolicy;
 import org.wso2.carbon.context.PrivilegedCarbonContext;
+import org.wso2.carbon.identity.application.authentication.framework.AuthenticationDataPublisher;
 import org.wso2.carbon.identity.application.authentication.framework.AuthenticationMethodNameTranslator;
+import org.wso2.carbon.identity.application.authentication.framework.util.FrameworkConstants;
 import org.wso2.carbon.identity.application.mgt.ApplicationManagementService;
 import org.wso2.carbon.identity.application.mgt.listener.ApplicationMgtListener;
-import org.wso2.carbon.identity.base.IdentityRuntimeException;
 import org.wso2.carbon.identity.core.util.IdentityCoreInitializedEvent;
-import org.wso2.carbon.identity.core.util.IdentityDatabaseUtil;
+import org.wso2.carbon.identity.event.handler.AbstractEventHandler;
+import org.wso2.carbon.identity.oauth.common.OAuthConstants;
 import org.wso2.carbon.identity.oauth.common.token.bindings.TokenBinderInfo;
 import org.wso2.carbon.identity.oauth.config.OAuthServerConfiguration;
+import org.wso2.carbon.identity.oauth.dto.ScopeDTO;
+import org.wso2.carbon.identity.oauth.internal.OAuthComponentServiceHolder;
 import org.wso2.carbon.identity.oauth2.OAuth2ScopeService;
 import org.wso2.carbon.identity.oauth2.OAuth2Service;
 import org.wso2.carbon.identity.oauth2.OAuth2TokenValidationService;
+import org.wso2.carbon.identity.oauth2.authz.validators.ResponseTypeRequestValidator;
+import org.wso2.carbon.identity.oauth2.bean.Scope;
+import org.wso2.carbon.identity.oauth2.bean.ScopeBinding;
 import org.wso2.carbon.identity.oauth2.client.authentication.BasicAuthClientAuthenticator;
 import org.wso2.carbon.identity.oauth2.client.authentication.OAuthClientAuthenticator;
 import org.wso2.carbon.identity.oauth2.client.authentication.OAuthClientAuthnService;
 import org.wso2.carbon.identity.oauth2.client.authentication.PublicClientAuthenticator;
 import org.wso2.carbon.identity.oauth2.dao.OAuthTokenPersistenceFactory;
-import org.wso2.carbon.identity.oauth2.dao.SQLQueries;
 import org.wso2.carbon.identity.oauth2.device.api.DeviceAuthService;
 import org.wso2.carbon.identity.oauth2.device.api.DeviceAuthServiceImpl;
+import org.wso2.carbon.identity.oauth2.device.response.DeviceFlowResponseTypeRequestValidator;
+import org.wso2.carbon.identity.oauth2.keyidprovider.DefaultKeyIDProviderImpl;
+import org.wso2.carbon.identity.oauth2.keyidprovider.KeyIDProvider;
 import org.wso2.carbon.identity.oauth2.listener.TenantCreationEventListener;
 import org.wso2.carbon.identity.oauth2.token.bindings.TokenBinder;
+import org.wso2.carbon.identity.oauth2.token.bindings.handlers.TokenBindingExpiryEventHandler;
 import org.wso2.carbon.identity.oauth2.token.bindings.impl.CookieBasedTokenBinder;
+import org.wso2.carbon.identity.oauth2.token.bindings.impl.DeviceFlowTokenBinder;
 import org.wso2.carbon.identity.oauth2.token.bindings.impl.SSOSessionBasedTokenBinder;
 import org.wso2.carbon.identity.oauth2.util.OAuth2Util;
+import org.wso2.carbon.identity.oauth2.validators.scope.ScopeValidator;
 import org.wso2.carbon.identity.openidconnect.OpenIDConnectClaimFilter;
 import org.wso2.carbon.identity.openidconnect.OpenIDConnectClaimFilterImpl;
+import org.wso2.carbon.identity.openidconnect.dao.ScopeClaimMappingDAO;
+import org.wso2.carbon.identity.openidconnect.dao.ScopeClaimMappingDAOImpl;
+import org.wso2.carbon.identity.organization.management.role.management.service.RoleManager;
+import org.wso2.carbon.identity.organization.management.service.OrganizationUserResidentResolverService;
 import org.wso2.carbon.identity.user.store.configuration.listener.UserStoreConfigListener;
+import org.wso2.carbon.idp.mgt.IdpManager;
 import org.wso2.carbon.registry.core.service.RegistryService;
 import org.wso2.carbon.stratos.common.listeners.TenantMgtListener;
+import org.wso2.carbon.utils.CarbonUtils;
 
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
 
+import javax.xml.namespace.QName;
+import javax.xml.stream.XMLInputFactory;
+import javax.xml.stream.XMLStreamException;
+import javax.xml.stream.XMLStreamReader;
+
+import static org.wso2.carbon.identity.oauth2.Oauth2ScopeConstants.PERMISSIONS_BINDING_TYPE;
+import static org.wso2.carbon.identity.oauth2.device.constants.Constants.DEVICE_FLOW_GRANT_TYPE;
 import static org.wso2.carbon.identity.oauth2.util.OAuth2Util.checkAudienceEnabled;
+import static org.wso2.carbon.identity.oauth2.util.OAuth2Util.checkConsentedTokenColumnAvailable;
 import static org.wso2.carbon.identity.oauth2.util.OAuth2Util.checkIDPIdColumnAvailable;
 
 /**
@@ -76,6 +109,13 @@ import static org.wso2.carbon.identity.oauth2.util.OAuth2Util.checkIDPIdColumnAv
 public class OAuth2ServiceComponent {
 
     private static final Log log = LogFactory.getLog(OAuth2ServiceComponent.class);
+    private static final String IDENTITY_PATH = "identity";
+    public static final String NAME = "name";
+    public static final String ID = "id";
+    private static final String DISPLAY_NAME = "displayName";
+    private static final String DESCRIPTION = "description";
+    private static final String PERMISSION = "Permission";
+    private static final String CLAIM = "Claim";
     private BundleContext bundleContext;
 
     @Reference(
@@ -103,6 +143,12 @@ public class OAuth2ServiceComponent {
     protected void activate(ComponentContext context) {
 
         try {
+            if (OAuth2ServiceComponentHolder.getInstance().getScopeClaimMappingDAO() == null) {
+                OAuth2ServiceComponentHolder.getInstance()
+                        .setScopeClaimMappingDAO(new ScopeClaimMappingDAOImpl());
+            }
+            loadScopeConfigFile();
+            loadOauthScopeBinding();
             int tenantId = PrivilegedCarbonContext.getThreadLocalCarbonContext().getTenantId();
             boolean isRecordExist = OAuthTokenPersistenceFactory.getInstance().getScopeClaimMappingDAO().
                     hasScopesPopulated(tenantId);
@@ -110,11 +156,7 @@ public class OAuth2ServiceComponent {
                 OAuth2Util.initiateOIDCScopes(tenantId);
             }
             TenantCreationEventListener scopeTenantMgtListener = new TenantCreationEventListener();
-            //Registering OAuth2Service as a OSGIService
             bundleContext = context.getBundleContext();
-            bundleContext.registerService(OAuth2Service.class.getName(), new OAuth2Service(), null);
-            //Registering OAuth2ScopeService as a OSGIService
-            bundleContext.registerService(OAuth2ScopeService.class.getName(), new OAuth2ScopeService(), null);
             //Registering TenantCreationEventListener
             ServiceRegistration scopeTenantMgtListenerSR = bundleContext.registerService(
                     TenantMgtListener.class.getName(), scopeTenantMgtListener, null);
@@ -149,8 +191,26 @@ public class OAuth2ServiceComponent {
             SSOSessionBasedTokenBinder ssoSessionBasedTokenBinder = new SSOSessionBasedTokenBinder();
             bundleContext.registerService(TokenBinderInfo.class.getName(), ssoSessionBasedTokenBinder, null);
 
+            // Device based access token binder only if token binding is enabled.
+            if (OAuth2Util.getSupportedGrantTypes().contains(DEVICE_FLOW_GRANT_TYPE)) {
+                DeviceFlowTokenBinder deviceFlowTokenBinder = new DeviceFlowTokenBinder();
+                bundleContext.registerService(TokenBinderInfo.class.getName(), deviceFlowTokenBinder, null);
+            }
+
+            bundleContext.registerService(ResponseTypeRequestValidator.class.getName(),
+                    new DeviceFlowResponseTypeRequestValidator(), null);
+
             if (log.isDebugEnabled()) {
                 log.debug("Identity OAuth bundle is activated");
+            }
+
+            if (OAuth2ServiceComponentHolder.getKeyIDProvider() == null) {
+                KeyIDProvider defaultKeyIDProvider = new DefaultKeyIDProviderImpl();
+                OAuth2ServiceComponentHolder.setKeyIDProvider(defaultKeyIDProvider);
+                if (log.isDebugEnabled()) {
+                    log.debug("Key ID Provider " + DefaultKeyIDProviderImpl.class.getSimpleName() +
+                            " registered as the default Key ID Provider implementation.");
+                }
             }
 
             ServiceRegistration tenantMgtListenerSR = bundleContext.registerService(TenantMgtListener.class.getName(),
@@ -182,13 +242,9 @@ public class OAuth2ServiceComponent {
             } else {
                 log.error("OAuth - ApplicationMgtListener could not be registered.");
             }
-            if (checkPKCESupport()) {
-                OAuth2ServiceComponentHolder.setPkceEnabled(true);
-                log.info("PKCE Support enabled.");
-            } else {
-                OAuth2ServiceComponentHolder.setPkceEnabled(false);
-                log.info("PKCE Support is disabled.");
-            }
+
+            // PKCE enabled by default.
+            OAuth2ServiceComponentHolder.setPkceEnabled(true);
 
             // Register device auth service.
             ServiceRegistration deviceAuthService = bundleContext.registerService(DeviceAuthService.class.getName(),
@@ -206,8 +262,24 @@ public class OAuth2ServiceComponent {
             if (log.isDebugEnabled()) {
                 log.debug("Default OpenIDConnect Claim filter registered successfully.");
             }
+
+            bundleContext.registerService(AbstractEventHandler.class.getName(), new TokenBindingExpiryEventHandler(),
+                    null);
+            if (log.isDebugEnabled()) {
+                log.debug("TokenBindingExpiryEventHandler is successfully registered.");
+            }
+
+            // Registering OAuth2Service as a OSGIService
+            bundleContext.registerService(OAuth2Service.class.getName(), new OAuth2Service(), null);
+            // Registering OAuth2ScopeService as a OSGIService
+            bundleContext.registerService(OAuth2ScopeService.class.getName(), new OAuth2ScopeService(), null);
+            // Note : DO NOT add any activation related code below this point,
+            // to make sure the server doesn't start up if any activation failures occur
+
         } catch (Throwable e) {
-            log.error("Error while activating OAuth2ServiceComponent.", e);
+            String errMsg = "Error while activating OAuth2ServiceComponent.";
+            log.error(errMsg, e);
+            throw new RuntimeException(errMsg, e);
         }
         if (checkAudienceEnabled()) {
             if (log.isDebugEnabled()) {
@@ -232,6 +304,18 @@ public class OAuth2ServiceComponent {
                         "Setting isIDPIdColumnEnabled to false.");
             }
             OAuth2ServiceComponentHolder.setIDPIdColumnEnabled(false);
+        }
+
+        boolean isConsentedTokenColumnAvailable = checkConsentedTokenColumnAvailable();
+        OAuth2ServiceComponentHolder.setConsentedTokenColumnEnabled(isConsentedTokenColumnAvailable);
+        if (log.isDebugEnabled()) {
+            if (isConsentedTokenColumnAvailable) {
+                log.debug("CONSENTED_TOKEN column is available in IDN_OAUTH2_ACCESS_TOKEN table. Hence setting " +
+                        "consentedColumnAvailable to true.");
+            } else {
+                log.debug("CONSENTED_TOKEN column is not available in IDN_OAUTH2_ACCESS_TOKEN table. Hence " +
+                        "setting consentedColumnAvailable to false.");
+            }
         }
     }
 
@@ -283,42 +367,6 @@ public class OAuth2ServiceComponent {
     protected void setIdentityCoreInitializedEventService(IdentityCoreInitializedEvent identityCoreInitializedEvent) {
         /* reference IdentityCoreInitializedEvent service to guarantee that this component will wait until identity core
          is started */
-    }
-
-    private boolean checkPKCESupport() {
-
-        try (Connection connection = IdentityDatabaseUtil.getDBConnection(false)) {
-
-            String sql;
-            if (connection.getMetaData().getDriverName().contains("MySQL")
-                    || connection.getMetaData().getDriverName().contains("H2")) {
-                sql = SQLQueries.RETRIEVE_PKCE_TABLE_MYSQL;
-            } else if (connection.getMetaData().getDatabaseProductName().contains("DB2")) {
-                sql = SQLQueries.RETRIEVE_PKCE_TABLE_DB2SQL;
-            } else if (connection.getMetaData().getDriverName().contains("MS SQL") ||
-                    connection.getMetaData().getDriverName().contains("Microsoft")) {
-                sql = SQLQueries.RETRIEVE_PKCE_TABLE_MSSQL;
-            } else if (connection.getMetaData().getDriverName().contains("PostgreSQL")) {
-                sql = SQLQueries.RETRIEVE_PKCE_TABLE_MYSQL;
-            } else if (connection.getMetaData().getDriverName().contains("Informix")) {
-                // Driver name = "IBM Informix JDBC Driver for IBM Informix Dynamic Server"
-                sql = SQLQueries.RETRIEVE_PKCE_TABLE_INFORMIX;
-            } else {
-                sql = SQLQueries.RETRIEVE_PKCE_TABLE_ORACLE;
-            }
-
-            try (PreparedStatement preparedStatement = connection.prepareStatement(sql);
-                 ResultSet resultSet = preparedStatement.executeQuery()) {
-                // Following statement will throw SQLException if the column is not found
-                resultSet.findColumn("PKCE_MANDATORY");
-                // If we are here then the column exists, so PKCE is supported by the database.
-                return true;
-            }
-
-        } catch (IdentityRuntimeException | SQLException e) {
-            return false;
-        }
-
     }
 
     @Reference(
@@ -390,5 +438,342 @@ public class OAuth2ServiceComponent {
         if (tokenBinderInfo instanceof TokenBinder) {
             OAuth2ServiceComponentHolder.getInstance().removeTokenBinder((TokenBinder) tokenBinderInfo);
         }
+    }
+
+    @Reference(name = "response.type.request.validator",
+            service = ResponseTypeRequestValidator.class,
+            cardinality = ReferenceCardinality.MULTIPLE,
+            policy = ReferencePolicy.DYNAMIC,
+            unbind = "unsetResponseTypeRequestValidator")
+    protected void setResponseTypeRequestValidator(ResponseTypeRequestValidator validator) {
+
+        OAuth2ServiceComponentHolder.getInstance().addResponseTypeRequestValidator(validator);
+        if (log.isDebugEnabled()) {
+            log.debug("Setting the response type request validator for: " + validator.getResponseType());
+        }
+    }
+
+    protected void unsetResponseTypeRequestValidator(ResponseTypeRequestValidator validator) {
+
+        OAuth2ServiceComponentHolder.getInstance().removeResponseTypeRequestValidator(validator);
+        if (log.isDebugEnabled()) {
+            log.debug("Un-setting the response type request validator for: " + validator.getResponseType());
+        }
+    }
+
+    @Reference(
+            name = "framework.authentication.data.publisher",
+            service = AuthenticationDataPublisher.class,
+            cardinality = ReferenceCardinality.MULTIPLE,
+            policy = ReferencePolicy.DYNAMIC,
+            unbind = "unsetAuthenticationDataPublisher"
+    )
+    protected void setAuthenticationDataPublisher(AuthenticationDataPublisher dataPublisher) {
+
+        if (FrameworkConstants.AnalyticsAttributes.AUTHN_DATA_PUBLISHER_PROXY.equalsIgnoreCase(dataPublisher.
+                getName()) && dataPublisher.isEnabled(null)) {
+            OAuth2ServiceComponentHolder.setAuthenticationDataPublisherProxy(dataPublisher);
+        }
+    }
+
+    protected void unsetAuthenticationDataPublisher(AuthenticationDataPublisher dataPublisher) {
+
+        if (FrameworkConstants.AnalyticsAttributes.AUTHN_DATA_PUBLISHER_PROXY.equalsIgnoreCase(dataPublisher.
+                getName()) && dataPublisher.isEnabled(null)) {
+            OAuth2ServiceComponentHolder.setAuthenticationDataPublisherProxy(null);
+        }
+    }
+
+    @Reference(
+            name = "keyid.provider.component",
+            service = KeyIDProvider.class,
+            cardinality = ReferenceCardinality.MULTIPLE,
+            policy = ReferencePolicy.DYNAMIC,
+            unbind = "unsetKeyIDProvider"
+    )
+    protected void setKeyIDProvider(KeyIDProvider keyIDProvider) {
+
+        KeyIDProvider oldKeyIDProvider = OAuth2ServiceComponentHolder.getKeyIDProvider();
+        if (oldKeyIDProvider == null || oldKeyIDProvider.getClass().getSimpleName().
+                equals(DefaultKeyIDProviderImpl.class.getSimpleName())) {
+
+            OAuth2ServiceComponentHolder.setKeyIDProvider(keyIDProvider);
+            if (log.isDebugEnabled()) {
+                log.debug("Custom Key ID Provider: " + keyIDProvider.getClass().getSimpleName() +
+                        "Registered replacing the default Key ID provider implementation.");
+            }
+        } else {
+            log.warn("Key ID Provider: " + keyIDProvider.getClass().getSimpleName() +
+                    " not registered since a custom Key ID Provider already exists in the placeholder.");
+        }
+
+    }
+
+    protected void unsetKeyIDProvider(KeyIDProvider keyIDProvider) {
+
+    }
+
+    @Reference(
+            name = "scope.validator.service",
+            service = ScopeValidator.class,
+            cardinality = ReferenceCardinality.MULTIPLE,
+            policy = ReferencePolicy.DYNAMIC,
+            unbind = "removeScopeValidatorService"
+    )
+    protected void addScopeValidatorService(ScopeValidator scopeValidator) {
+
+        if (log.isDebugEnabled()) {
+            log.debug("Adding the Scope validator Service : " + scopeValidator.getName());
+        }
+        OAuthComponentServiceHolder.getInstance().addScopeValidator(scopeValidator);
+    }
+
+    protected void removeScopeValidatorService(ScopeValidator scopeValidator) {
+
+        if (log.isDebugEnabled()) {
+            log.debug("Removing the Scope validator Service : " + scopeValidator.getName());
+        }
+        OAuthComponentServiceHolder.getInstance().removeScopeValidator(scopeValidator);
+    }
+
+    @Reference(
+            name = "IdentityProviderManager",
+            service = org.wso2.carbon.idp.mgt.IdpManager.class,
+            cardinality = ReferenceCardinality.MANDATORY,
+            policy = ReferencePolicy.DYNAMIC,
+            unbind = "unsetIdpManager")
+    protected void setIdpManager(IdpManager idpManager) {
+
+        OAuth2ServiceComponentHolder.getInstance().setIdpManager(idpManager);
+    }
+
+    protected void unsetIdpManager(IdpManager idpManager) {
+
+        OAuth2ServiceComponentHolder.getInstance().setIdpManager(null);
+    }
+
+    @Reference(
+            name = "scope.claim.mapping.dao",
+            service = ScopeClaimMappingDAO.class,
+            cardinality = ReferenceCardinality.OPTIONAL,
+            policy = ReferencePolicy.DYNAMIC,
+            unbind = "unsetScopeClaimMappingDAO"
+    )
+    protected void setScopeClaimMappingDAO(ScopeClaimMappingDAO scopeClaimMappingDAO) {
+
+        ScopeClaimMappingDAO existingScopeClaimMappingDAO = OAuth2ServiceComponentHolder.getInstance()
+                .getScopeClaimMappingDAO();
+        if (existingScopeClaimMappingDAO != null) {
+            log.warn("Scope Claim DAO implementation " + existingScopeClaimMappingDAO.getClass().getName() +
+                            " is registered already and PersistenceFactory is created." +
+                            " So DAO Impl : " + scopeClaimMappingDAO.getClass().getName() + " will not be registered");
+        } else {
+            OAuth2ServiceComponentHolder.getInstance().setScopeClaimMappingDAO(scopeClaimMappingDAO);
+            if (log.isDebugEnabled()) {
+                log.debug("Scope Claim DAO implementation got registered: " +
+                        scopeClaimMappingDAO.getClass().getName());
+            }
+        }
+    }
+
+    protected void unsetScopeClaimMappingDAO(ScopeClaimMappingDAO scopeClaimMappingDAO) {
+
+        OAuth2ServiceComponentHolder.getInstance().setScopeClaimMappingDAO(new ScopeClaimMappingDAOImpl());
+        if (log.isDebugEnabled()) {
+            log.debug("Scope Claim DAO implementation got removed: " + scopeClaimMappingDAO.getClass().getName());
+        }
+    }
+
+    @Reference(
+            name = "carbon.organization.management.role.management.component",
+            service = RoleManager.class,
+            cardinality = ReferenceCardinality.OPTIONAL,
+            policy = ReferencePolicy.DYNAMIC,
+            unbind = "unsetOrganizationRoleManager"
+    )
+    protected void setOrganizationRoleManager(RoleManager roleManager) {
+
+        if (log.isDebugEnabled()) {
+            log.debug("Setting organization role management service");
+        }
+        OAuth2ServiceComponentHolder.setRoleManager(roleManager);
+    }
+
+    protected void unsetOrganizationRoleManager(RoleManager roleManager) {
+
+        OAuth2ServiceComponentHolder.setRoleManager(null);
+        if (log.isDebugEnabled()) {
+            log.debug("Unset organization role management service.");
+        }
+    }
+
+    @Reference(
+            name = "organization.user.resident.resolver.service",
+            service = OrganizationUserResidentResolverService.class,
+            cardinality = ReferenceCardinality.MANDATORY,
+            policy = ReferencePolicy.DYNAMIC,
+            unbind = "unsetOrganizationUserResidentResolverService"
+    )
+    protected void setOrganizationUserResidentResolverService(
+            OrganizationUserResidentResolverService organizationUserResidentResolverService) {
+
+        if (log.isDebugEnabled()) {
+            log.debug("Setting the organization user resident resolver service.");
+        }
+        OAuth2ServiceComponentHolder.setOrganizationUserResidentResolverService(
+                organizationUserResidentResolverService);
+    }
+
+    protected void unsetOrganizationUserResidentResolverService(
+            OrganizationUserResidentResolverService organizationUserResidentResolverService) {
+
+        if (log.isDebugEnabled()) {
+            log.debug("Unset organization user resident resolver service.");
+        }
+        OAuth2ServiceComponentHolder.setOrganizationUserResidentResolverService(null);
+    }
+
+    private static void loadScopeConfigFile() {
+
+        List<ScopeDTO> listOIDCScopesClaims = new ArrayList<>();
+        String configDirPath = CarbonUtils.getCarbonConfigDirPath();
+        String confXml =
+                Paths.get(configDirPath, IDENTITY_PATH, OAuthConstants.OIDC_SCOPE_CONFIG_PATH).toString();
+        File configFile = new File(confXml);
+        if (!configFile.exists()) {
+            log.warn("OIDC scope-claim Configuration File is not present at: " + confXml);
+            return;
+        }
+
+        XMLStreamReader parser = null;
+        try (InputStream stream = new FileInputStream(configFile)) {
+
+            parser = XMLInputFactory.newInstance().createXMLStreamReader(stream);
+            StAXOMBuilder builder = new StAXOMBuilder(parser);
+            OMElement documentElement = builder.getDocumentElement();
+            Iterator iterator = documentElement.getChildElements();
+            while (iterator.hasNext()) {
+                ScopeDTO scope = new ScopeDTO();
+                OMElement omElement = (OMElement) iterator.next();
+                String configType = omElement.getAttributeValue(new QName(ID));
+                scope.setName(configType);
+
+                String displayName = omElement.getAttributeValue(new QName(DISPLAY_NAME));
+                if (StringUtils.isNotEmpty(displayName)) {
+                    scope.setDisplayName(displayName);
+                } else {
+                    scope.setDisplayName(configType);
+                }
+
+                String description = omElement.getAttributeValue(new QName(DESCRIPTION));
+                if (StringUtils.isNotEmpty(description)) {
+                    scope.setDescription(description);
+                }
+
+                scope.setClaim(loadClaimConfig(omElement));
+                listOIDCScopesClaims.add(scope);
+            }
+        } catch (XMLStreamException e) {
+            log.warn("Error while streaming OIDC scope config.", e);
+        } catch (IOException e) {
+            log.warn("Error while loading OIDC scope config.", e);
+        } finally {
+            try {
+                if (parser != null) {
+                    parser.close();
+                }
+            } catch (XMLStreamException e) {
+                log.error("Error while closing XML stream", e);
+            }
+        }
+        OAuth2ServiceComponentHolder.getInstance().setOIDCScopesClaims(listOIDCScopesClaims);
+    }
+
+    private static String[] loadClaimConfig(OMElement configElement) {
+
+        StringBuilder claimConfig = new StringBuilder();
+        Iterator it = configElement.getChildElements();
+        while (it.hasNext()) {
+            OMElement element = (OMElement) it.next();
+            if (CLAIM.equals(element.getLocalName())) {
+                String commaSeparatedClaimNames = element.getText();
+                if (StringUtils.isNotBlank(commaSeparatedClaimNames)) {
+                    claimConfig.append(commaSeparatedClaimNames.trim());
+                }
+            }
+        }
+
+        String[] claim;
+        if (claimConfig.length() > 0) {
+            claim = claimConfig.toString().split(",");
+        } else {
+            claim = new String[0];
+        }
+        return claim;
+    }
+
+    private static void loadOauthScopeBinding() {
+
+        List<Scope> scopes = new ArrayList<>();
+        String configDirPath = CarbonUtils.getCarbonConfigDirPath();
+        String confXml = Paths.get(configDirPath, IDENTITY_PATH, OAuthConstants.OAUTH_SCOPE_BINDING_PATH).toString();
+        File configFile = new File(confXml);
+        if (!configFile.exists()) {
+            log.warn("OAuth scope binding File is not present at: " + confXml);
+            return;
+        }
+
+        XMLStreamReader parser = null;
+        try (InputStream stream = new FileInputStream(configFile)) {
+
+            parser = XMLInputFactory.newInstance()
+                    .createXMLStreamReader(stream);
+            StAXOMBuilder builder = new StAXOMBuilder(parser);
+            OMElement documentElement = builder.getDocumentElement();
+            Iterator iterator = documentElement.getChildElements();
+            while (iterator.hasNext()) {
+                OMElement omElement = (OMElement) iterator.next();
+                String scopeName = omElement.getAttributeValue(new QName(NAME));
+                String displayName = omElement.getAttributeValue(new QName(DISPLAY_NAME));
+                String description = omElement.getAttributeValue(new QName(DESCRIPTION));
+                List<String> bindingPermissions = loadScopePermissions(omElement);
+                ScopeBinding scopeBinding = new ScopeBinding(PERMISSIONS_BINDING_TYPE, bindingPermissions);
+                List<ScopeBinding> scopeBindings = new ArrayList<>();
+                scopeBindings.add(scopeBinding);
+                Scope scope = new Scope(scopeName, displayName, scopeBindings, description);
+                scopes.add(scope);
+            }
+        } catch (XMLStreamException e) {
+            log.warn("Error while streaming oauth-scope-bindings config.", e);
+        } catch (IOException e) {
+            log.warn("Error while loading oauth-scope-bindings config.", e);
+        } finally {
+            try {
+                if (parser != null) {
+                    parser.close();
+                }
+            } catch (XMLStreamException e) {
+                log.error("Error while closing XML stream", e);
+            }
+        }
+        OAuth2ServiceComponentHolder.getInstance().setOauthScopeBinding(scopes);
+    }
+
+    private static List<String> loadScopePermissions(OMElement configElement) {
+
+        List<String> permissions = new ArrayList<>();
+        Iterator it = configElement.getChildElements();
+        while (it.hasNext()) {
+            OMElement element = (OMElement) it.next();
+            Iterator permissionIterator = element.getChildElements();
+            while (permissionIterator.hasNext()) {
+                OMElement permissionElement = (OMElement) permissionIterator.next();
+                if (PERMISSION.equals(permissionElement.getLocalName())) {
+                    String permission = permissionElement.getText();
+                    permissions.add(permission);
+                }
+            }
+        }
+        return permissions;
     }
 }

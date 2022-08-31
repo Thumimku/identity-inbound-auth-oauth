@@ -28,8 +28,11 @@ import org.powermock.modules.testng.PowerMockTestCase;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
+import org.wso2.carbon.base.CarbonBaseConstants;
 import org.wso2.carbon.base.MultitenantConstants;
+import org.wso2.carbon.context.PrivilegedCarbonContext;
 import org.wso2.carbon.identity.application.authentication.framework.model.AuthenticatedUser;
+import org.wso2.carbon.identity.central.log.mgt.utils.LoggerUtils;
 import org.wso2.carbon.identity.common.testng.WithAxisConfiguration;
 import org.wso2.carbon.identity.common.testng.WithCarbonHome;
 import org.wso2.carbon.identity.core.persistence.JDBCPersistenceManager;
@@ -41,7 +44,6 @@ import org.wso2.carbon.identity.oauth.config.OAuthServerConfiguration;
 import org.wso2.carbon.identity.oauth.dao.OAuthAppDO;
 import org.wso2.carbon.identity.oauth.internal.OAuthComponentServiceHolder;
 import org.wso2.carbon.identity.oauth.tokenprocessor.PlainTextPersistenceProcessor;
-import org.wso2.carbon.identity.oauth2.dao.TokenMgtDAO;
 import org.wso2.carbon.identity.oauth2.dto.OAuth2ClientApplicationDTO;
 import org.wso2.carbon.identity.oauth2.dto.OAuth2TokenValidationRequestDTO;
 import org.wso2.carbon.identity.oauth2.dto.OAuth2TokenValidationResponseDTO;
@@ -56,6 +58,8 @@ import org.wso2.carbon.user.api.RealmConfiguration;
 import org.wso2.carbon.user.core.service.RealmService;
 import org.wso2.carbon.user.core.tenant.TenantManager;
 
+import java.io.File;
+import java.nio.file.Paths;
 import java.sql.Connection;
 import java.sql.Timestamp;
 import java.util.HashMap;
@@ -70,7 +74,7 @@ import static org.testng.Assert.assertNotNull;
 @WithAxisConfiguration
 @PowerMockIgnore({"javax.xml.*", "org.xml.sax.*", "org.w3c.dom.*"})
 @PrepareForTest({OAuthServerConfiguration.class, JDBCPersistenceManager.class, IdentityDatabaseUtil.class,
-        RealmService.class})
+        RealmService.class, LoggerUtils.class, IdentityUtil.class})
 public class TokenValidationHandlerTest extends PowerMockTestCase {
 
     private String[] scopeArraySorted = new String[]{"scope1", "scope2", "scope3"};
@@ -82,7 +86,6 @@ public class TokenValidationHandlerTest extends PowerMockTestCase {
     private Timestamp refreshTokenIssuedTime;
     private long validityPeriodInMillis;
     private long refreshTokenValidityPeriodInMillis;
-    private TokenMgtDAO tokenMgtDAO;
     private static final String DEFAULT_TOKEN_TYPE = "Default";
     private static final String JWT_TOKEN_TYPE = "JWT";
     private static final String DB_NAME = "jdbc/WSO2IdentityDB";
@@ -104,16 +107,35 @@ public class TokenValidationHandlerTest extends PowerMockTestCase {
 
     private TokenValidationHandler tokenValidationHandler;
 
+    private static final String oAuth2TokenEPUrl
+            = "${carbon.protocol}://${carbon.host}:${carbon.management.port}" +
+            "/oauth2/token";
+
     @BeforeMethod
     public void setUp() {
+        System.setProperty(
+                CarbonBaseConstants.CARBON_HOME,
+                Paths.get(System.getProperty("user.dir"), "src", "test", "resources").toString()
+        );
+        mockStatic(IdentityUtil.class);
+        when(IdentityUtil.getIdentityConfigDirPath())
+                .thenReturn(System.getProperty("user.dir")
+                        + File.separator + "src"
+                        + File.separator + "test"
+                        + File.separator + "resources"
+                        + File.separator + "conf");
+        when(IdentityUtil.fillURLPlaceholders(oAuth2TokenEPUrl))
+                .thenReturn(oAuth2TokenEPUrl);
+
         authzUser = new AuthenticatedUser();
-        tokenMgtDAO = new TokenMgtDAO();
         issuedTime = new Timestamp(System.currentTimeMillis());
         refreshTokenIssuedTime = new Timestamp(System.currentTimeMillis());
         validityPeriodInMillis = 3600000L;
         refreshTokenValidityPeriodInMillis = 3600000L;
         tokenValidationHandler = TokenValidationHandler.getInstance();
         tokenValidationHandler.addTokenValidator("test", tokenValidator);
+        mockStatic(LoggerUtils.class);
+        when(LoggerUtils.isDiagnosticLogsEnabled()).thenReturn(true);
     }
 
     @Test
@@ -175,6 +197,7 @@ public class TokenValidationHandlerTest extends PowerMockTestCase {
 
         OAuth2ServiceComponentHolder.setIDPIdColumnEnabled(isIDPIdColumnEnabled);
         mockRequiredObjects();
+        PrivilegedCarbonContext.getThreadLocalCarbonContext().setTenantDomain("carbon.super");
         when(realmService.getTenantManager()).thenReturn(tenantManager);
         doReturn(MultitenantConstants.SUPER_TENANT_ID).when(tenantManager).getTenantId(Mockito.anyString());
         OAuthComponentServiceHolder.getInstance().setRealmService(realmService);
@@ -198,8 +221,6 @@ public class TokenValidationHandlerTest extends PowerMockTestCase {
         oAuthAppDO.setApplicationName("testApp");
         AppInfoCache appInfoCache = AppInfoCache.getInstance();
         appInfoCache.addToCache("testConsumerKey", oAuthAppDO);
-        tokenMgtDAO.persistAccessToken("testAccessToken", "testConsumerKey", accessTokenDO, accessTokenDO,
-                "TESTDOMAIN");
         oAuth2TokenValidationRequestDTO.setAccessToken(accessToken);
         when(OAuth2Util.getPersistenceProcessor()).thenReturn(new PlainTextPersistenceProcessor());
 

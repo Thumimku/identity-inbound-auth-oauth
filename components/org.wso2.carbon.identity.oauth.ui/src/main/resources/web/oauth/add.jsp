@@ -23,6 +23,7 @@
 <%@ page import="org.wso2.carbon.identity.oauth.stub.dto.TokenBindingMetaDataDTO" %>
 <%@ page import="org.wso2.carbon.identity.oauth.ui.client.OAuthAdminClient" %>
 <%@ page import="org.wso2.carbon.identity.oauth.ui.util.OAuthUIUtil" %>
+<%@ page import="org.wso2.carbon.identity.core.util.IdentityUtil"%>
 <%@ page import="org.wso2.carbon.ui.CarbonUIMessage" %>
 <%@ page import="org.wso2.carbon.ui.CarbonUIUtil" %>
 <%@ page import="org.wso2.carbon.utils.ServerConstants" %>
@@ -168,11 +169,12 @@
                         CARBON.showWarningDialog('<fmt:message key="application.is.required"/>');
                         return false;
                     }
+                    <%  if (allowedGrants.contains("refresh_token")) { %>
                     if (!$(jQuery("#grant_refresh_token"))[0].checked) {
                         document.getElementById("renewRefreshTokenPerApp").checked = true;
                         document.getElementById("renewRefreshTokenPerApp").value = 'notAssigned';
                     }
-
+                    <%  } %>
                     var version2Checked = document.getElementById("oauthVersion20").checked;
                     if (version2Checked) {
                         if (!$(jQuery("#grant_authorization_code"))[0].checked && !$(jQuery("#grant_implicit"))[0].checked) {
@@ -254,6 +256,8 @@
                         $(jQuery('#renew_refresh_token_per_app').hide());
                         $('#accessTokenBindingType_none').prop('checked', true);
                         $("#bindAccessToken").hide();
+                        $(jQuery('#revokeTokensWhenIDPSessionTerminated').hide());
+                        $(jQuery('#validateTokenBindingEnabled').hide());
 
                     } else if (oauthVersion == "<%=OAuthConstants.OAuthVersions.VERSION_2%>") {
                         $(jQuery('#grant_row')).show();
@@ -333,6 +337,8 @@
                         } else {
                             $('#bindAccessToken').hide();
                         }
+                        $(jQuery('#revokeTokensWhenIDPSessionTerminated').show());
+                        $(jQuery('#validateTokenBindingEnabled').show());
                     }
                 }
 
@@ -444,10 +450,19 @@
                                 <tr>
                                     <td class="leftCol-med"><fmt:message key='oauth.version'/><span
                                             class="required">*</span></td>
-                                    <td><input id="oauthVersion10a" name="oauthVersion" type="radio"
-                                               value="<%=OAuthConstants.OAuthVersions.VERSION_1A%>"/>1.0a
-                                        <input id="oauthVersion20" name="oauthVersion" type="radio"
-                                               value="<%=OAuthConstants.OAuthVersions.VERSION_2%>" CHECKED/>2.0
+                                    <td>
+                                    <%
+                                    String OAuth1FieldDisabled = "disabled";
+                                    boolean isOAuth1Enabled = IdentityUtil.isLegacyFeatureEnabled("oauth", "1.0");
+                                    if (isOAuth1Enabled) {
+                                          OAuth1FieldDisabled = "";
+                                    }
+                                    %>
+                                    <input id="oauthVersion10a" name="oauthVersion" type="radio"
+                                          value="<%=OAuthConstants.OAuthVersions.VERSION_1A%>"
+                                          <%=OAuth1FieldDisabled%>/>1.0a
+                                    <input id="oauthVersion20" name="oauthVersion" type="radio"
+                                          value="<%=OAuthConstants.OAuthVersions.VERSION_2%>" CHECKED/>2.0
                                     </td>
                                 </tr>
                                 <%if (applicationSPName != null) {%>
@@ -683,6 +698,28 @@
                                                 }
                                             %>
                                         </table>
+                                    </td>
+                                </tr>
+                                <tr id="validateTokenBindingEnabled">
+                                    <td colspan="2">
+                                        <label>
+                                            <input type="checkbox" name="validateTokenBindingEnabled" value="yes">
+                                            <fmt:message key='token.binding.validation.enabled'/>
+                                        </label>
+                                        <div class="sectionHelp">
+                                            <fmt:message key='token.binding.validation.enabled.hint'/>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <tr id="revokeTokensWhenIDPSessionTerminated">
+                                    <td colspan="2">
+                                        <label>
+                                            <input type="checkbox" name="revokeTokensWhenIDPSessionTerminated" value="yes">
+                                            <fmt:message key='revoke.tokens.when.idp.session.terminated'/>
+                                        </label>
+                                        <div class="sectionHelp">
+                                            <fmt:message key='revoke.tokens.when.idp.session.terminated.hint'/>
+                                        </div>
                                     </td>
                                 </tr>
                                 <tr id="userAccessTokenPlain">

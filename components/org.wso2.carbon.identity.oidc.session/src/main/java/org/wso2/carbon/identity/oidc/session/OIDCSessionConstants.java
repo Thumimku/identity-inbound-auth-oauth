@@ -24,6 +24,7 @@ package org.wso2.carbon.identity.oidc.session;
 public class OIDCSessionConstants {
 
     public static final String OPBS_COOKIE_ID = "opbs";
+    public static final String TENANT_QUALIFIED_OPBS_COOKIE_SUFFIX = "-v2";
 
     // Request Parameters
     public static final String OIDC_CLIENT_ID_PARAM = "client_id";
@@ -31,6 +32,7 @@ public class OIDCSessionConstants {
     public static final String OIDC_SESSION_STATE_PARAM = "session_state";
     public static final String OIDC_LOGOUT_CONSENT_PARAM = "consent";
     public static final String OIDC_ID_TOKEN_HINT_PARAM = "id_token_hint";
+    public static final String OIDC_TENANT_DOMAIN_PARAM = "tenant_domain";
     public static final String OIDC_POST_LOGOUT_REDIRECT_URI_PARAM = "post_logout_redirect_uri";
     public static final String OIDC_STATE_PARAM = "state";
     public static final String OIDC_SESSION_DATA_KEY_PARAM = "sessionDataKey";

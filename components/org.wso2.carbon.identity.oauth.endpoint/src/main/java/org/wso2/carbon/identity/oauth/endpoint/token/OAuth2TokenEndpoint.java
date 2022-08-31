@@ -19,26 +19,25 @@
 package org.wso2.carbon.identity.oauth.endpoint.token;
 
 import org.apache.commons.collections.MapUtils;
+import org.apache.commons.lang.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.cxf.interceptor.InInterceptors;
 import org.apache.oltu.oauth2.as.response.OAuthASResponse;
 import org.apache.oltu.oauth2.as.response.OAuthASResponse.OAuthTokenResponseBuilder;
-import org.apache.oltu.oauth2.common.OAuth;
 import org.apache.oltu.oauth2.common.error.OAuthError;
 import org.apache.oltu.oauth2.common.exception.OAuthProblemException;
 import org.apache.oltu.oauth2.common.exception.OAuthSystemException;
 import org.apache.oltu.oauth2.common.message.OAuthResponse;
 import org.apache.oltu.oauth2.common.message.types.GrantType;
 import org.wso2.carbon.context.PrivilegedCarbonContext;
+import org.wso2.carbon.identity.central.log.mgt.utils.LoggerUtils;
 import org.wso2.carbon.identity.oauth.client.authn.filter.OAuthClientAuthenticatorProxy;
 import org.wso2.carbon.identity.oauth.common.OAuth2ErrorCodes;
 import org.wso2.carbon.identity.oauth.common.OAuthConstants;
-import org.wso2.carbon.identity.oauth.common.exception.OAuthClientException;
 import org.wso2.carbon.identity.oauth.endpoint.OAuthRequestWrapper;
 import org.wso2.carbon.identity.oauth.endpoint.exception.InvalidApplicationClientException;
 import org.wso2.carbon.identity.oauth.endpoint.exception.InvalidRequestParentException;
-import org.wso2.carbon.identity.oauth.endpoint.exception.TokenEndpointAccessDeniedException;
 import org.wso2.carbon.identity.oauth.endpoint.exception.TokenEndpointBadRequestException;
 import org.wso2.carbon.identity.oauth.endpoint.util.EndpointUtil;
 import org.wso2.carbon.identity.oauth2.ResponseHeader;
@@ -46,6 +45,10 @@ import org.wso2.carbon.identity.oauth2.bean.OAuthClientAuthnContext;
 import org.wso2.carbon.identity.oauth2.dto.OAuth2AccessTokenReqDTO;
 import org.wso2.carbon.identity.oauth2.dto.OAuth2AccessTokenRespDTO;
 import org.wso2.carbon.identity.oauth2.model.CarbonOAuthTokenRequest;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletRequestWrapper;
@@ -60,6 +63,7 @@ import javax.ws.rs.core.Response;
 import javax.ws.rs.core.Response.ResponseBuilder;
 
 import static org.apache.commons.lang.StringUtils.isNotBlank;
+import static org.wso2.carbon.identity.oauth.endpoint.util.EndpointUtil.parseJsonTokenRequest;
 import static org.wso2.carbon.identity.oauth.endpoint.util.EndpointUtil.startSuperTenantFlow;
 import static org.wso2.carbon.identity.oauth.endpoint.util.EndpointUtil.triggerOnTokenExceptionListeners;
 import static org.wso2.carbon.identity.oauth.endpoint.util.EndpointUtil.validateOauthApplication;
@@ -78,11 +82,55 @@ public class OAuth2TokenEndpoint {
 
     @POST
     @Path("/")
+    @Consumes("application/json")
+    @Produces("application/json")
+    public Response issueAccessToken(@Context HttpServletRequest request, String payload) throws
+            OAuthSystemException, InvalidRequestParentException {
+
+        Map<String, List<String>> paramMap;
+        try {
+            startSuperTenantFlow();
+            paramMap = parseJsonTokenRequest(payload);
+            if (LoggerUtils.isDiagnosticLogsEnabled()) {
+                Map<String, Object> params = new HashMap<>();
+                if (MapUtils.isNotEmpty(paramMap)) {
+                    paramMap.forEach(params::put);
+                }
+                LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, params,
+                        OAuthConstants.LogConstants.SUCCESS, "Successfully received token request.",
+                        "receive-token-request", null);
+            }
+        } catch (TokenEndpointBadRequestException e) {
+            triggerOnTokenExceptionListeners(e, request, null);
+            throw e;
+        } finally {
+            PrivilegedCarbonContext.endTenantFlow();
+        }
+        return issueAccessToken(request, paramMap);
+    }
+
+    @POST
+    @Path("/")
     @Consumes("application/x-www-form-urlencoded")
     @Produces("application/json")
     public Response issueAccessToken(@Context HttpServletRequest request,
                                      MultivaluedMap<String, String> paramMap)
             throws OAuthSystemException, InvalidRequestParentException {
+
+        if (LoggerUtils.isDiagnosticLogsEnabled()) {
+            Map<String, Object> params = new HashMap<>();
+            if (MapUtils.isNotEmpty(paramMap)) {
+                paramMap.forEach(params::put);
+            }
+            LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, params,
+                    OAuthConstants.LogConstants.SUCCESS, "Successfully received token request.",
+                    "receive-token-request", null);
+        }
+        return issueAccessToken(request, (Map<String, List<String>>) paramMap);
+    }
+
+    protected Response issueAccessToken(HttpServletRequest request, Map<String, List<String>> paramMap) throws
+            OAuthSystemException, InvalidRequestParentException {
 
         try {
             startSuperTenantFlow();
@@ -91,7 +139,7 @@ public class OAuth2TokenEndpoint {
 
             CarbonOAuthTokenRequest oauthRequest = buildCarbonOAuthTokenRequest(httpRequest);
             validateOAuthApplication(oauthRequest.getoAuthClientAuthnContext());
-            OAuth2AccessTokenRespDTO oauth2AccessTokenResp = issueAccessToken(oauthRequest);
+            OAuth2AccessTokenRespDTO oauth2AccessTokenResp = issueAccessToken(oauthRequest, httpRequest);
 
             if (oauth2AccessTokenResp.getErrorMsg() != null) {
                 return handleErrorResponse(oauth2AccessTokenResp);
@@ -140,7 +188,7 @@ public class OAuth2TokenEndpoint {
         return OAuthError.TokenResponse.INVALID_REQUEST.equalsIgnoreCase(e.getError());
     }
 
-    private void validateRepeatedParams(HttpServletRequest request, MultivaluedMap<String, String> paramMap)
+    private void validateRepeatedParams(HttpServletRequest request, Map<String, List<String>> paramMap)
             throws TokenEndpointBadRequestException {
 
         if (!validateParams(request, paramMap)) {
@@ -149,7 +197,7 @@ public class OAuth2TokenEndpoint {
     }
 
     private void validateOAuthApplication(OAuthClientAuthnContext oAuthClientAuthnContext)
-            throws InvalidApplicationClientException, TokenEndpointBadRequestException {
+            throws InvalidApplicationClientException {
 
         if (isNotBlank(oAuthClientAuthnContext.getClientId()) && !oAuthClientAuthnContext
                 .isMultipleAuthenticatorsEngaged()) {
@@ -159,12 +207,16 @@ public class OAuth2TokenEndpoint {
 
     private Response buildTokenResponse(OAuth2AccessTokenRespDTO oauth2AccessTokenResp) throws OAuthSystemException {
 
+        if (StringUtils.isBlank(oauth2AccessTokenResp.getTokenType())) {
+            oauth2AccessTokenResp.setTokenType(BEARER);
+        }
+
         OAuthTokenResponseBuilder oAuthRespBuilder = OAuthASResponse
                 .tokenResponse(HttpServletResponse.SC_OK)
                 .setAccessToken(oauth2AccessTokenResp.getAccessToken())
                 .setRefreshToken(oauth2AccessTokenResp.getRefreshToken())
                 .setExpiresIn(Long.toString(oauth2AccessTokenResp.getExpiresIn()))
-                .setTokenType(BEARER);
+                .setTokenType(oauth2AccessTokenResp.getTokenType());
         oAuthRespBuilder.setScope(oauth2AccessTokenResp.getAuthorizedScopes());
 
         if (oauth2AccessTokenResp.getIDToken() != null) {
@@ -173,8 +225,7 @@ public class OAuth2TokenEndpoint {
 
         // Set custom parameters in token response if supported
         if (MapUtils.isNotEmpty(oauth2AccessTokenResp.getParameters())) {
-            oauth2AccessTokenResp.getParameters().forEach((paramKey, paramValue) -> oAuthRespBuilder.setParam
-                    (paramKey, paramValue));
+            oauth2AccessTokenResp.getParameters().forEach(oAuthRespBuilder::setParam);
         }
 
         OAuthResponse response = oAuthRespBuilder.buildJSONMessage();
@@ -201,7 +252,7 @@ public class OAuth2TokenEndpoint {
 
         // if there is an auth failure, HTTP 401 Status Code should be sent back to the client.
         if (OAuth2ErrorCodes.INVALID_CLIENT.equals(oauth2AccessTokenResp.getErrorCode())) {
-            return handleBasicAuthFailure(oauth2AccessTokenResp.getErrorCode(), oauth2AccessTokenResp.getErrorMsg());
+            return handleBasicAuthFailure(oauth2AccessTokenResp.getErrorMsg());
         } else if (SQL_ERROR.equals(oauth2AccessTokenResp.getErrorCode())) {
             return handleSQLError();
         } else if (OAuth2ErrorCodes.SERVER_ERROR.equals(oauth2AccessTokenResp.getErrorCode())) {
@@ -228,64 +279,15 @@ public class OAuth2TokenEndpoint {
         }
     }
 
-    private String getConsumerKey(HttpServletRequestWrapper httpRequest) {
+    private Response handleBasicAuthFailure(String errorMessage) throws OAuthSystemException {
 
-        if (log.isDebugEnabled()) {
-            log.debug("Consumer key:" + httpRequest.getParameter(OAuth.OAUTH_CLIENT_ID));
+        if (StringUtils.isBlank(errorMessage)) {
+            errorMessage = "Client Authentication failed.";
         }
-        return httpRequest.getParameter(OAuth.OAUTH_CLIENT_ID);
-    }
-
-    private void validateAuthorizationHeader(HttpServletRequest request, MultivaluedMap<String, String> paramMap)
-            throws TokenEndpointAccessDeniedException {
-
-        try {
-            // The client MUST NOT use more than one authentication method in each request
-            if (isClientCredentialsExistsAsParams(paramMap)) {
-                if (log.isDebugEnabled()) {
-                    log.debug("Client Id and Client Secret found in request body and Authorization header" +
-                            ". Credentials should be sent in either request body or Authorization header, not both");
-                }
-                throw new TokenEndpointAccessDeniedException("Client Authentication failed");
-            }
-            String[] credentials = getClientCredentials(request);
-            // add the credentials available in Authorization header to the parameter map
-            paramMap.add(OAuth.OAUTH_CLIENT_ID, credentials[0]);
-            paramMap.add(OAuth.OAUTH_CLIENT_SECRET, credentials[1]);
-
-            if (log.isDebugEnabled()) {
-                log.debug("Client credentials extracted from the Authorization Header");
-            }
-
-        } catch (OAuthClientException e) {
-            // malformed credential string is considered as an auth failure.
-            if (log.isDebugEnabled()) {
-                log.error("Error while extracting credentials from authorization header", e);
-            }
-        }
-    }
-
-    private boolean isClientCredentialsExistsAsParams(MultivaluedMap<String, String> paramMap) {
-
-        return paramMap.containsKey(OAuth.OAUTH_CLIENT_ID) && paramMap.containsKey(OAuth.OAUTH_CLIENT_SECRET);
-    }
-
-    private String[] getClientCredentials(HttpServletRequest request) throws OAuthClientException {
-
-        return EndpointUtil.extractCredentialsFromAuthzHeader(
-                request.getHeader(OAuthConstants.HTTP_REQ_HEADER_AUTHZ));
-    }
-
-    private boolean isAuthorizationHeaderExists(HttpServletRequest request) {
-
-        return request.getHeader(OAuthConstants.HTTP_REQ_HEADER_AUTHZ) != null;
-    }
-
-    private Response handleBasicAuthFailure(String errorCode, String errorMessage) throws OAuthSystemException {
 
         OAuthResponse response = OAuthASResponse.errorResponse(HttpServletResponse.SC_UNAUTHORIZED)
                 .setError(OAuth2ErrorCodes.INVALID_CLIENT)
-                .setErrorDescription("Client Authentication failed.").buildJSONMessage();
+                .setErrorDescription(errorMessage).buildJSONMessage();
         return Response.status(response.getResponseStatus())
                 .header(OAuthConstants.HTTP_RESP_HEADER_AUTHENTICATE, EndpointUtil.getRealmInfo())
                 .entity(response.getBody()).build();
@@ -312,13 +314,15 @@ public class OAuth2TokenEndpoint {
                 EndpointUtil.getRealmInfo()).entity(response.getBody()).build();
     }
 
-    private OAuth2AccessTokenRespDTO issueAccessToken(CarbonOAuthTokenRequest oauthRequest) {
+    private OAuth2AccessTokenRespDTO issueAccessToken(CarbonOAuthTokenRequest oauthRequest,
+                                                      HttpServletRequestWrapper httpServletRequestWrapper) {
 
-        OAuth2AccessTokenReqDTO tokenReqDTO = buildAccessTokenReqDTO(oauthRequest);
+        OAuth2AccessTokenReqDTO tokenReqDTO = buildAccessTokenReqDTO(oauthRequest, httpServletRequestWrapper);
         return EndpointUtil.getOAuth2Service().issueAccessToken(tokenReqDTO);
     }
 
-    private OAuth2AccessTokenReqDTO buildAccessTokenReqDTO(CarbonOAuthTokenRequest oauthRequest) {
+    private OAuth2AccessTokenReqDTO buildAccessTokenReqDTO(CarbonOAuthTokenRequest oauthRequest,
+                                                           HttpServletRequestWrapper httpServletRequestWrapper) {
 
         OAuth2AccessTokenReqDTO tokenReqDTO = new OAuth2AccessTokenReqDTO();
         OAuthClientAuthnContext oauthClientAuthnContext = oauthRequest.getoAuthClientAuthnContext();
@@ -328,13 +332,15 @@ public class OAuth2TokenEndpoint {
         tokenReqDTO.setClientId(oauthClientAuthnContext.getClientId());
         tokenReqDTO.setClientSecret(oauthRequest.getClientSecret());
         tokenReqDTO.setCallbackURI(oauthRequest.getRedirectURI());
-        tokenReqDTO.setScope(oauthRequest.getScopes().toArray(new String[oauthRequest.getScopes().size()]));
+        tokenReqDTO.setScope(oauthRequest.getScopes().toArray(new String[0]));
         tokenReqDTO.setTenantDomain(oauthRequest.getTenantDomain());
         tokenReqDTO.setPkceCodeVerifier(oauthRequest.getPkceCodeVerifier());
         // Set all request parameters to the OAuth2AccessTokenReqDTO
         tokenReqDTO.setRequestParameters(oauthRequest.getRequestParameters());
         // Set all request headers to the OAuth2AccessTokenReqDTO
         tokenReqDTO.setHttpRequestHeaders(oauthRequest.getHttpRequestHeaders());
+        // Set the request wrapper so we can get remote information later.
+        tokenReqDTO.setHttpServletRequestWrapper(httpServletRequestWrapper);
 
         // Check the grant type and set the corresponding parameters
         if (GrantType.AUTHORIZATION_CODE.toString().equals(grantType)) {

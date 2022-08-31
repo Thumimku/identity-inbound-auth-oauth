@@ -31,6 +31,18 @@ import java.util.List;
 public interface ScopeClaimMappingDAO {
 
     /**
+     * Initialize the scope claim mapping for tenant. This wil be used during the server startup and tenant creation.
+     *
+     * @param tenantId       Tenant Id.
+     * @param scopeClaims    List of oidc scope claims.
+     * @throws IdentityOAuth2Exception if an error occurs when inserting scopes or claims.
+     */
+    default void initScopeClaimMapping(int tenantId, List<ScopeDTO> scopeClaims) throws IdentityOAuth2Exception {
+
+        addScopes(tenantId, scopeClaims);
+    }
+
+    /**
      * To add OIDC scopes and claims in the related db tables.
      *
      * @param tenantId       tenant Id
@@ -128,7 +140,7 @@ public interface ScopeClaimMappingDAO {
     boolean hasScopesPopulated(int tenantId) throws IdentityOAuth2Exception;
 
     /**
-     * To check whether the scope is existing.
+     * To check whether the OIDC scope is existing.
      *
      * @param scope    scope name
      * @param tenantId tenant id

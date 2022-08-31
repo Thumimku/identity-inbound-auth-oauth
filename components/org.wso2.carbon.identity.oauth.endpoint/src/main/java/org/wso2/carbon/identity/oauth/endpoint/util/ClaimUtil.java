@@ -25,11 +25,9 @@ import org.apache.commons.logging.LogFactory;
 import org.apache.oltu.oauth2.common.error.OAuthError;
 import org.wso2.carbon.identity.application.authentication.framework.exception.FrameworkException;
 import org.wso2.carbon.identity.application.authentication.framework.model.AuthenticatedUser;
-import org.wso2.carbon.identity.application.authentication.framework.util.FrameworkConstants;
-import org.wso2.carbon.identity.application.common.IdentityApplicationManagementException;
+import org.wso2.carbon.identity.application.authentication.framework.util.FrameworkUtils;
 import org.wso2.carbon.identity.application.common.model.ClaimMapping;
 import org.wso2.carbon.identity.application.common.model.ServiceProvider;
-import org.wso2.carbon.identity.application.mgt.ApplicationManagementService;
 import org.wso2.carbon.identity.base.IdentityConstants;
 import org.wso2.carbon.identity.base.IdentityException;
 import org.wso2.carbon.identity.claim.metadata.mgt.ClaimMetadataHandler;
@@ -39,6 +37,7 @@ import org.wso2.carbon.identity.core.util.IdentityUtil;
 import org.wso2.carbon.identity.oauth.cache.AuthorizationGrantCache;
 import org.wso2.carbon.identity.oauth.cache.AuthorizationGrantCacheEntry;
 import org.wso2.carbon.identity.oauth.cache.AuthorizationGrantCacheKey;
+import org.wso2.carbon.identity.oauth.common.exception.InvalidOAuthClientException;
 import org.wso2.carbon.identity.oauth.config.OAuthServerConfiguration;
 import org.wso2.carbon.identity.oauth.dao.OAuthAppDO;
 import org.wso2.carbon.identity.oauth.endpoint.user.impl.UserInfoEndpointConfig;
@@ -46,14 +45,13 @@ import org.wso2.carbon.identity.oauth.user.UserInfoClaimRetriever;
 import org.wso2.carbon.identity.oauth.user.UserInfoEndpointException;
 import org.wso2.carbon.identity.oauth2.IdentityOAuth2Exception;
 import org.wso2.carbon.identity.oauth2.dto.OAuth2TokenValidationResponseDTO;
-import org.wso2.carbon.identity.oauth2.internal.OAuth2ServiceComponentHolder;
 import org.wso2.carbon.identity.oauth2.model.AccessTokenDO;
 import org.wso2.carbon.identity.oauth2.util.OAuth2Util;
 import org.wso2.carbon.identity.openidconnect.OIDCClaimUtil;
 import org.wso2.carbon.user.api.RealmConfiguration;
 import org.wso2.carbon.user.api.UserStoreException;
 import org.wso2.carbon.user.core.UserRealm;
-import org.wso2.carbon.user.core.UserStoreManager;
+import org.wso2.carbon.user.core.common.AbstractUserStoreManager;
 import org.wso2.carbon.user.core.util.UserCoreUtil;
 import org.wso2.carbon.utils.multitenancy.MultitenantUtils;
 
@@ -62,6 +60,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 import static org.apache.commons.collections.MapUtils.isEmpty;
 import static org.apache.commons.collections.MapUtils.isNotEmpty;
@@ -74,7 +73,7 @@ import static org.wso2.carbon.identity.core.util.IdentityUtil.isTokenLoggable;
 public class ClaimUtil {
 
     private static final String SP_DIALECT = "http://wso2.org/oidc/claim";
-    private static final String INBOUND_AUTH2_TYPE = "oauth2";
+    private static final String ATTRIBUTE_SEPARATOR = FrameworkUtils.getMultiAttributeSeparator();
     private static final Log log = LogFactory.getLog(ClaimUtil.class);
 
     private ClaimUtil() {
@@ -107,8 +106,8 @@ public class ClaimUtil {
             throws UserInfoEndpointException {
 
         try {
-            String username = tokenResponse.getAuthorizedUser();
-            String userTenantDomain = MultitenantUtils.getTenantDomain(tokenResponse.getAuthorizedUser());
+            String userId;
+            String userTenantDomain;
             UserRealm realm;
             List<String> claimURIList = new ArrayList<>();
             Map<String, Object> mappedAppClaims = new HashMap<>();
@@ -117,9 +116,12 @@ public class ClaimUtil {
             try {
                 AccessTokenDO accessTokenDO = OAuth2Util.getAccessTokenDOfromTokenIdentifier(
                         OAuth2Util.getAccessTokenIdentifier(tokenResponse));
+                userId = accessTokenDO.getAuthzUser().getUserId();
+                userTenantDomain = accessTokenDO.getAuthzUser().getTenantDomain();
+
                 // If the authenticated user is a federated user and had not mapped to local users, no requirement to
                 // retrieve claims from local userstore.
-                if (!OAuthServerConfiguration.getInstance().isMapFederatedUsersToLocal() && accessTokenDO != null) {
+                if (!OAuthServerConfiguration.getInstance().isMapFederatedUsersToLocal()) {
                     AuthenticatedUser authenticatedUser = accessTokenDO.getAuthzUser();
                     if (isNotEmpty(authenticatedUser.getUserStoreDomain())) {
                         String userstoreDomain = authenticatedUser.getUserStoreDomain();
@@ -134,7 +136,7 @@ public class ClaimUtil {
                 OAuthAppDO oAuthAppDO = OAuth2Util.getAppInformationByClientId(clientId);
                 String spTenantDomain = OAuth2Util.getTenantDomainOfOauthApp(oAuthAppDO);
 
-                ServiceProvider serviceProvider = getServiceProvider(clientId, spTenantDomain);
+                ServiceProvider serviceProvider = OAuth2Util.getServiceProvider(clientId, spTenantDomain);
                 ClaimMapping[] requestedLocalClaimMappings = serviceProvider.getClaimConfig().getClaimMappings();
                 String subjectClaimURI = getSubjectClaimUri(serviceProvider, requestedLocalClaimMappings);
 
@@ -161,21 +163,23 @@ public class ClaimUtil {
                     spToLocalClaimMappings = ClaimMetadataHandler.getInstance().getMappingsMapFromOtherDialectToCarbon
                             (SP_DIALECT, null, userTenantDomain, true);
 
-                    realm = getUserRealm(username, userTenantDomain);
-                    Map<String, String> userClaims = getUserClaimsFromUserStore(username, realm, claimURIList);
+                    realm = getUserRealm(null, userTenantDomain);
+                    Map<String, String> userClaims = getUserClaimsFromUserStore(userId, realm, claimURIList);
 
                     if (isNotEmpty(userClaims)) {
                         for (Map.Entry<String, String> entry : userClaims.entrySet()) {
                             //set local2sp role mappings
-                            if (FrameworkConstants.LOCAL_ROLE_CLAIM_URI.equals(entry.getKey())) {
-                                String claimSeparator = getMultiAttributeSeparator(username, realm);
+                            if (IdentityUtil.getRoleGroupClaims().stream().anyMatch(roleGroupClaimURI ->
+                                    roleGroupClaimURI.equals(entry.getKey()))) {
+                                String claimSeparator = getMultiAttributeSeparator(userId, realm);
                                 entry.setValue(getSpMappedRoleClaim(serviceProvider, entry, claimSeparator));
                             }
 
                             String oidcClaimUri = spToLocalClaimMappings.get(entry.getKey());
+                            String claimValue = entry.getValue();
                             if (oidcClaimUri != null) {
                                 if (entry.getKey().equals(subjectClaimURI)) {
-                                    subjectClaimValue = entry.getValue();
+                                    subjectClaimValue = claimValue;
                                     if (!isSubjectClaimInRequested) {
                                         if (log.isDebugEnabled()) {
                                             log.debug("Subject claim: " + entry.getKey() + " is not a requested " +
@@ -184,10 +188,17 @@ public class ClaimUtil {
                                         continue;
                                     }
                                 }
-                                mappedAppClaims.put(oidcClaimUri, entry.getValue());
+
+                                if (isMultiValuedAttribute(claimValue)) {
+                                    String[] attributeValues = processMultiValuedAttribute(claimValue);
+                                    mappedAppClaims.put(oidcClaimUri, attributeValues);
+                                } else {
+                                    mappedAppClaims.put(oidcClaimUri, claimValue);
+                                }
+
                                 if (log.isDebugEnabled() &&
                                         isTokenLoggable(IdentityConstants.IdentityTokens.USER_CLAIMS)) {
-                                    log.debug("Mapped claim: key -  " + oidcClaimUri + " value -" + entry.getValue());
+                                    log.debug("Mapped claim: key -  " + oidcClaimUri + " value -" + claimValue);
                                 }
                             }
                         }
@@ -205,17 +216,27 @@ public class ClaimUtil {
                     log.debug("Subject claim(sub) value: " + subjectClaimValue + " set in returned claims.");
                 }
                 mappedAppClaims.put(OAuth2Util.SUB, subjectClaimValue);
+            } catch (InvalidOAuthClientException e) {
+                if (log.isDebugEnabled()) {
+                    log.debug(" Error while retrieving App information with provided client id.", e);
+                }
+                throw new IdentityOAuth2Exception(e.getMessage());
             } catch (Exception e) {
+                String authorizedUserName = tokenResponse.getAuthorizedUser();
                 if (e instanceof UserStoreException) {
                     if (e.getMessage().contains("UserNotFound")) {
                         if (log.isDebugEnabled()) {
-                            log.debug("User " + username + " not found in user store");
+                            log.debug(StringUtils.isNotEmpty(authorizedUserName) ? "User with username: "
+                                    + authorizedUserName + ", cannot be found in user store" : "User cannot " +
+                                    "found in user store");
                         }
                     }
                 } else {
-                    log.error("Error while retrieving the claims from user store for " + username, e);
-                    throw new IdentityOAuth2Exception("Error while retrieving the claims from user store for "
-                            + username);
+                    String errMsg = StringUtils.isNotEmpty(authorizedUserName) ? "Error while retrieving the claims " +
+                            "from user store for the username: " + authorizedUserName : "Error while retrieving the " +
+                            "claims from user store";
+                    log.error(errMsg, e);
+                    throw new IdentityOAuth2Exception(errMsg);
                 }
             }
             return mappedAppClaims;
@@ -263,13 +284,16 @@ public class ClaimUtil {
         return claimSeparator;
     }
 
-    private static Map<String, String> getUserClaimsFromUserStore(String username,
+    private static Map<String, String> getUserClaimsFromUserStore(String userId,
                                                                   UserRealm realm,
                                                                   List<String> claimURIList) throws UserStoreException {
 
-        UserStoreManager userstore = realm.getUserStoreManager();
-        Map<String, String> userClaims = userstore.getUserClaimValues(MultitenantUtils.getTenantAwareUsername
-                (username), claimURIList.toArray(new String[claimURIList.size()]), null);
+        AbstractUserStoreManager userstore = (AbstractUserStoreManager) realm.getUserStoreManager();
+        if (userstore == null) {
+            throw new UserStoreException("Unable to retrieve UserStoreManager");
+        }
+        Map<String, String> userClaims =
+                userstore.getUserClaimValuesWithID(userId, claimURIList.toArray(new String[0]), null);
         if (log.isDebugEnabled()) {
             log.debug("User claims retrieved from user store: " + userClaims.size());
         }
@@ -300,21 +324,6 @@ public class ClaimUtil {
             }
         }
         return subjectClaimURI;
-    }
-
-    private static ServiceProvider getServiceProvider(String clientId, String spTenantDomain)
-            throws IdentityApplicationManagementException, UserInfoEndpointException {
-
-        ApplicationManagementService applicationMgtService = OAuth2ServiceComponentHolder.getApplicationMgtService();
-        String spName = applicationMgtService.getServiceProviderNameByClientId(clientId, INBOUND_AUTH2_TYPE,
-                spTenantDomain);
-        ServiceProvider serviceProvider = applicationMgtService.getApplicationExcludingFileBasedSPs(spName,
-                spTenantDomain);
-        if (serviceProvider == null) {
-            throw new UserInfoEndpointException("Cannot retrieve service provider: " + spName + " in " +
-                    "tenantDomain: " + spTenantDomain);
-        }
-        return serviceProvider;
     }
 
     private static String getClientID(AccessTokenDO accessTokenDO) throws UserInfoEndpointException {
@@ -362,5 +371,27 @@ public class ClaimUtil {
             return new HashMap<>();
         }
         return cacheEntry.getUserAttributes();
+    }
+
+    /**
+     * Check whether claim value is multivalued attribute or not by using attribute separator.
+     *
+     * @param claimValue String value contains claims.
+     * @return Whether it is multivalued attribute or not.
+     */
+    public static boolean isMultiValuedAttribute(String claimValue) {
+
+        return StringUtils.contains(claimValue, ATTRIBUTE_SEPARATOR);
+    }
+
+    /**
+     * Split multivalued attribute string value by attribute separator.
+     *
+     * @param claimValue String value contains claims.
+     * @return String array of multivalued claim values.
+     */
+    public static String[] processMultiValuedAttribute(String claimValue) {
+
+        return claimValue.split(Pattern.quote(ATTRIBUTE_SEPARATOR));
     }
 }

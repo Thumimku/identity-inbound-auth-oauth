@@ -36,7 +36,9 @@ import org.testng.annotations.BeforeTest;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 import org.wso2.carbon.base.CarbonBaseConstants;
+import org.wso2.carbon.identity.central.log.mgt.utils.LoggerUtils;
 import org.wso2.carbon.identity.core.util.IdentityDatabaseUtil;
+import org.wso2.carbon.identity.core.util.IdentityTenantUtil;
 import org.wso2.carbon.identity.oauth.common.NTLMAuthenticationValidator;
 import org.wso2.carbon.identity.oauth.common.OAuth2ErrorCodes;
 import org.wso2.carbon.identity.oauth.common.OAuthConstants;
@@ -63,6 +65,7 @@ import java.util.List;
 import java.util.Map;
 
 import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletRequestWrapper;
 import javax.servlet.http.HttpServletResponse;
 import javax.ws.rs.HttpMethod;
 import javax.ws.rs.core.MultivaluedHashMap;
@@ -82,7 +85,7 @@ import static org.testng.Assert.assertNotNull;
 import static org.testng.Assert.assertTrue;
 
 @PrepareForTest({EndpointUtil.class, IdentityDatabaseUtil.class, OAuthServerConfiguration.class,
-        CarbonOAuthTokenRequest.class})
+        CarbonOAuthTokenRequest.class, LoggerUtils.class, IdentityTenantUtil.class})
 public class OAuth2TokenEndpointTest extends TestOAuthEndpointBase {
 
     @Mock
@@ -245,6 +248,10 @@ public class OAuth2TokenEndpointTest extends TestOAuthEndpointBase {
         requestParams.put(OAuth.OAUTH_USERNAME, new String[]{USERNAME});
         requestParams.put(OAuth.OAUTH_PASSWORD, new String[]{"password"});
 
+        mockStatic(LoggerUtils.class);
+        when(LoggerUtils.isDiagnosticLogsEnabled()).thenReturn(true);
+        mockStatic(IdentityTenantUtil.class);
+        when(IdentityTenantUtil.getTenantId(anyString())).thenReturn(-1234);
         HttpServletRequest request = mockHttpRequest(requestParams, new HashMap<String, Object>());
         when(request.getHeader(OAuthConstants.HTTP_REQ_HEADER_AUTHZ)).thenReturn(authzHeader);
         when(request.getHeaderNames()).thenReturn(
@@ -338,6 +345,10 @@ public class OAuth2TokenEndpointTest extends TestOAuthEndpointBase {
         requestParams.put(OAuth.OAUTH_USERNAME, new String[]{USERNAME});
         requestParams.put(OAuth.OAUTH_PASSWORD, new String[]{"password"});
 
+        mockStatic(LoggerUtils.class);
+        when(LoggerUtils.isDiagnosticLogsEnabled()).thenReturn(true);
+        mockStatic(IdentityTenantUtil.class);
+        when(IdentityTenantUtil.getTenantId(anyString())).thenReturn(-1234);
         HttpServletRequest request = mockHttpRequest(requestParams, new HashMap<String, Object>());
         when(request.getHeader(OAuthConstants.HTTP_REQ_HEADER_AUTHZ)).thenReturn(AUTHORIZATION_HEADER);
         when(request.getHeaderNames()).thenReturn(
@@ -457,14 +468,15 @@ public class OAuth2TokenEndpointTest extends TestOAuthEndpointBase {
         }).when(oAuth2Service).issueAccessToken(any(OAuth2AccessTokenReqDTO.class));
 
         CarbonOAuthTokenRequest oauthRequest = new CarbonOAuthTokenRequest(request);
+        HttpServletRequestWrapper httpServletRequestWrapper = new HttpServletRequestWrapper(request);
 
         Class<?> clazz = OAuth2TokenEndpoint.class;
         Object tokenEndpointObj = clazz.newInstance();
         Method getAccessToken = tokenEndpointObj.getClass().
-                getDeclaredMethod("issueAccessToken", CarbonOAuthTokenRequest.class);
+                getDeclaredMethod("issueAccessToken", CarbonOAuthTokenRequest.class, HttpServletRequestWrapper.class);
         getAccessToken.setAccessible(true);
         OAuth2AccessTokenRespDTO tokenRespDTO = (OAuth2AccessTokenRespDTO)
-                getAccessToken.invoke(tokenEndpointObj, oauthRequest);
+                getAccessToken.invoke(tokenEndpointObj, oauthRequest, httpServletRequestWrapper);
 
         assertNotNull(tokenRespDTO, "ResponseDTO is null");
         String[] paramsToCheck = additionalParameters.split(",");

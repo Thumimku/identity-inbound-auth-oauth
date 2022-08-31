@@ -23,7 +23,7 @@
         <groupId>org.wso2.carbon.identity.inbound.auth.oauth2</groupId>
         <artifactId>identity-inbound-auth-oauth</artifactId>
         <relativePath>../../pom.xml</relativePath>
-        <version>6.2.138-SNAPSHOT</version>
+        <version>6.7.188-SNAPSHOT</version>
     </parent>
 
     <modelVersion>4.0.0</modelVersion>
@@ -42,6 +42,16 @@
         <dependency>
             <groupId>org.apache.tomcat</groupId>
             <artifactId>tomcat-coyote</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-api</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-core</artifactId>
+            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>commons-lang.wso2</groupId>
@@ -92,6 +102,10 @@
         <dependency>
             <groupId>org.wso2.carbon</groupId>
             <artifactId>org.wso2.carbon.registry.core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.wso2.orbit.org.opensaml</groupId>
+            <artifactId>opensaml</artifactId>
         </dependency>
         <dependency>
             <groupId>org.wso2.carbon.identity.framework</groupId>
@@ -209,6 +223,14 @@
             <groupId>org.wso2.carbon.identity.framework</groupId>
             <artifactId>org.wso2.carbon.identity.claim.metadata.mgt</artifactId>
         </dependency>
+        <dependency>
+            <groupId>org.wso2.carbon.identity.organization.management</groupId>
+            <artifactId>org.wso2.carbon.identity.organization.management.service</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.wso2.carbon.identity.organization.management</groupId>
+            <artifactId>org.wso2.carbon.identity.organization.management.role.management.service</artifactId>
+        </dependency>
 
         <dependency>
             <groupId>org.apache.felix</groupId>
@@ -243,23 +265,22 @@
         </dependency>
         <dependency>
             <groupId>org.powermock</groupId>
-            <artifactId>powermock-module-junit4</artifactId>
+            <artifactId>powermock-api-mockito2</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
-            <groupId>org.powermock</groupId>
-            <artifactId>powermock-api-mockito</artifactId>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.sun.xml.parsers</groupId>
+            <artifactId>jaxp-ri</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>com.h2database</groupId>
             <artifactId>h2</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.google.guava</groupId>
-            <artifactId>guava</artifactId>
-            <version>22.0</version>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -271,10 +292,6 @@
             <groupId>org.wso2.carbon.identity.inbound.auth.saml2</groupId>
             <artifactId>org.wso2.carbon.identity.sso.saml</artifactId>
             <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.wso2.orbit.org.opensaml</groupId>
-            <artifactId>opensaml</artifactId>
         </dependency>
         <dependency>
             <groupId>org.wso2.carbon</groupId>
@@ -294,6 +311,14 @@
         <dependency>
             <groupId>org.wso2.carbon.utils</groupId>
             <artifactId>org.wso2.carbon.database.utils</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.wso2.carbon.identity.framework</groupId>
+            <artifactId>org.wso2.carbon.identity.multi.attribute.login.mgt</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.wso2.carbon.identity.framework</groupId>
+            <artifactId>org.wso2.carbon.identity.central.log.mgt</artifactId>
         </dependency>
     </dependencies>
 
@@ -354,8 +379,8 @@
                             waffle.windows.auth.impl; version="${waffle.imp.pkg.version.range}",
 
                             org.joda.time;version="${joda.wso2.osgi.version.range}",
-                            org.opensaml.*; version="${opensaml2.wso2.osgi.version.range}",
-                            net.shibboleth.utilities.java.support.*; version="${opensaml2.wso2.osgi.version.range}",
+                            org.opensaml.*; version="${opensaml3.wso2.osgi.version.range}",
+                            net.shibboleth.utilities.java.support.*; version="${opensaml3.wso2.osgi.version.range}",
 
                             org.osgi.framework; version="${osgi.framework.imp.pkg.version.range}",
                             org.osgi.service.component; version="${osgi.service.component.imp.pkg.version.range}",
@@ -364,12 +389,16 @@
                             org.wso2.carbon.idp.mgt; version="${carbon.identity.framework.imp.pkg.version.range}",
                             org.wso2.carbon.identity.base; version="${carbon.identity.framework.imp.pkg.version.range}",
                             org.wso2.carbon.identity.core.*; version="${carbon.identity.framework.imp.pkg.version.range}",
+                            org.wso2.carbon.identity.central.log.mgt.*; version="${carbon.identity.framework.imp.pkg.version.range}",
                             org.wso2.carbon.identity.application.mgt; version="${carbon.identity.framework.imp.pkg.version.range}",
                             org.wso2.carbon.identity.application.common.*;version="${carbon.identity.framework.imp.pkg.version.range}",
                             org.wso2.carbon.identity.application.authentication.framework.*;version="${carbon.identity.framework.imp.pkg.version.range}",
                             org.wso2.carbon.identity.user.store.configuration.*;version="${carbon.identity.framework.imp.pkg.version.range}",
                             org.wso2.carbon.identity.oauth.common.token.bindings.*;version="${identity.inbound.auth.oauth.imp.pkg.version.range}",
+                            org.wso2.carbon.identity.oauth.common.*;version="${identity.inbound.auth.oauth.imp.pkg.version.range}",
                             org.wso2.carbon.identity.saml.common.util.*; version="${saml.common.util.version.range}",
+                            org.wso2.carbon.identity.organization.management.service.*; version="${carbon.identity.organization.management.version.range}",
+                            org.wso2.carbon.identity.organization.management.role.management.service.*; version="${carbon.identity.organization.management.version.range}",
 
                             org.wso2.carbon.base; version="${carbon.base.imp.pkg.version.range}",
                             org.wso2.carbon.registry.api;version="${carbon.kernel.registry.imp.pkg.version.range}",
@@ -381,6 +410,8 @@
                             org.wso2.carbon.core.*;version="${carbon.kernel.imp.pkg.version.range}",
                             org.wso2.carbon.user.core.*;version="${carbon.kernel.imp.pkg.version.range}",
                             org.wso2.carbon.utils.multitenancy;version="${carbon.kernel.imp.pkg.version.range}",
+                            org.wso2.carbon.identity.multi.attribute.login.mgt.*;
+                            version="${carbon.identity.framework.imp.pkg.version.range}",
                         </Import-Package>
                         <Export-Package>
                             !org.wso2.carbon.identity.oauth.internal,
@@ -390,6 +421,11 @@
                             org.wso2.carbon.identity.openidconnect.*;version="${identity.inbound.auth.oauth.exp.pkg.version}",
                         </Export-Package>
                         <DynamicImport-Package>*</DynamicImport-Package>
+                        <ListenerManager-RequiredServices>
+                            org.wso2.carbon.identity.oauth2.OAuth2Service,
+                            org.wso2.carbon.identity.oauth2.OAuth2ScopeService,
+                            org.wso2.carbon.identity.oauth.OAuthAdminServiceImpl
+                        </ListenerManager-RequiredServices>
                     </instructions>
                 </configuration>
             </plugin>
@@ -398,6 +434,30 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>${maven.surefire.plugin.version}</version>
                 <configuration>
+                    <argLine>
+                        --add-opens java.base/java.util=ALL-UNNAMED
+                        --add-opens java.base/java.lang=ALL-UNNAMED
+                        --add-opens java.base/java.lang.reflect=ALL-UNNAMED
+                        --add-opens java.base/java.io=ALL-UNNAMED
+                        --add-opens java.base/java.nio.file=ALL-UNNAMED
+                        --add-opens java.base/java.nio.charset=ALL-UNNAMED
+                        --add-opens java.base/java.net=ALL-UNNAMED
+                        --add-opens java.base/java.security=ALL-UNNAMED
+                        --add-opens java.base/java.util.stream=ALL-UNNAMED
+                        --add-opens java.base/java.util.regex=ALL-UNNAMED
+                        --add-opens java.base/java.util.concurrent=ALL-UNNAMED
+                        --add-opens java.base/jdk.internal.util=ALL-UNNAMED
+                        --add-exports java.base/jdk.internal.loader=ALL-UNNAMED
+                        --add-exports java.xml/jdk.xml.internal=ALL-UNNAMED
+                        --add-opens java.xml/jdk.xml.internal=ALL-UNNAMED
+                        --add-opens java.base/jdk.internal.loader=ALL-UNNAMED
+                        --add-opens java.base/sun.nio.fs=ALL-UNNAMED
+                        --add-opens java.base/sun.nio.cs=ALL-UNNAMED
+                        --add-opens java.base/sun.reflect.misc=ALL-UNNAMED
+                        --add-opens java.base/sun.net.www.protocol.https=ALL-UNNAMED
+                        --add-opens java.base/sun.security.util=ALL-UNNAMED
+                        --add-opens java.base/sun.security.jca=ALL-UNNAMED
+                    </argLine>
                     <suiteXmlFiles>
                         <suiteXmlFile>src/test/resources/testng.xml</suiteXmlFile>
                     </suiteXmlFiles>
@@ -407,6 +467,7 @@
                     <reuseForks>true</reuseForks>
                     <classpathDependencyExcludes>
                         <classpathDependencyExclude>org.ops4j.pax.logging</classpathDependencyExclude>
+                        <classpathDependencyExclude>org.wso2.org.ops4j.pax.logging</classpathDependencyExclude>
                     </classpathDependencyExcludes>
                 </configuration>
             </plugin>

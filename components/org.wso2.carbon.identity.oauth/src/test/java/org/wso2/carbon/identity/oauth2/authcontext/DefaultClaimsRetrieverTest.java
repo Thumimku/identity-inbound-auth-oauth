@@ -36,6 +36,7 @@ import org.wso2.carbon.utils.multitenancy.MultitenantUtils;
 import java.util.HashMap;
 import java.util.Map;
 
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Matchers.anyInt;
 import static org.mockito.Matchers.anyString;
 import static org.mockito.Mockito.mock;
@@ -194,7 +195,7 @@ public class DefaultClaimsRetrieverTest extends PowerMockTestCase {
         when(mockedRealmService.getTenantUserRealm(anyInt())).thenReturn(mockedUserRealm);
         mockedClaimManager = mock(ClaimManager.class);
         when(mockedUserRealm.getClaimManager()).thenReturn(mockedClaimManager);
-        when(mockedClaimManager.getAllClaimMappings(anyString())).thenReturn(this.getSampleClaimMapping());
+        when(mockedClaimManager.getAllClaimMappings(nullable(String.class))).thenReturn(this.getSampleClaimMapping());
         assertNotNull(defaultClaimsRetriever.getDefaultClaims("admin"));
 
     }
@@ -217,7 +218,7 @@ public class DefaultClaimsRetrieverTest extends PowerMockTestCase {
         mockedClaimManager = mock(ClaimManager.class);
         when(mockedUserRealm.getClaimManager()).thenReturn(mockedClaimManager);
 
-        when(mockedClaimManager.getAllClaimMappings(anyString())).
+        when(mockedClaimManager.getAllClaimMappings(nullable(String.class))).
                 thenThrow(new UserStoreException("UserStoreException"));
         assertNotNull(defaultClaimsRetriever.getDefaultClaims("admin"));
     }

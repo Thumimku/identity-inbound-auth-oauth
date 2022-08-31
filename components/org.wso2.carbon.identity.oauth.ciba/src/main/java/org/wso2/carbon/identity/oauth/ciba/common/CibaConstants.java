@@ -28,6 +28,7 @@ public class CibaConstants {
     public static final long EXPIRES_IN_DEFAULT_VALUE_IN_SEC = 3600;
     public static final long INTERVAL_DEFAULT_VALUE_IN_SEC = 2;
     public static final long MAXIMUM_REQUESTED_EXPIRY_IN_SEC = 3600;
+    public static final long MAXIMUM_NOT_BEFORE_TIME_IN_SEC = 3600;
     public static final long SEC_TO_MILLISEC_FACTOR = 1000;
     public static final String INTERVAL = "interval";
     public static final String AUTH_REQ_ID = "auth_req_id";
@@ -37,6 +38,7 @@ public class CibaConstants {
     public static final String REQUESTED_EXPIRY = "requested_expiry";
     public static final String LOGIN_HINT_TOKEN = "login_hint_token";
     public static final String OAUTH_CIBA_GRANT_TYPE = "urn:openid:params:grant-type:ciba";
+    public static final String OAUTH_CIBA_RESPONSE_TYPE = "ciba";
     public static final String RESPONSE_TYPE_VALUE = "cibaAuthCode";
     public static final String USER_IDENTITY = "user";
     public static final String BINDING_MESSAGE = "binding_message";

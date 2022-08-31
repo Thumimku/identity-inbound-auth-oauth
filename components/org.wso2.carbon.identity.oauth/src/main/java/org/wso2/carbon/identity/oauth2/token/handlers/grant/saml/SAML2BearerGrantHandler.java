@@ -45,9 +45,9 @@ import org.wso2.carbon.base.ServerConfiguration;
 import org.wso2.carbon.context.PrivilegedCarbonContext;
 import org.wso2.carbon.context.RegistryType;
 import org.wso2.carbon.identity.application.authentication.framework.model.AuthenticatedUser;
-import org.wso2.carbon.identity.application.authentication.framework.util.FrameworkConstants;
 import org.wso2.carbon.identity.application.authentication.framework.util.FrameworkUtils;
 import org.wso2.carbon.identity.application.common.IdentityApplicationManagementException;
+import org.wso2.carbon.identity.application.common.model.CertificateInfo;
 import org.wso2.carbon.identity.application.common.model.ClaimMapping;
 import org.wso2.carbon.identity.application.common.model.FederatedAuthenticatorConfig;
 import org.wso2.carbon.identity.application.common.model.IdentityProvider;
@@ -82,6 +82,8 @@ import org.wso2.carbon.idp.mgt.IdentityProviderManager;
 import org.wso2.carbon.registry.core.Registry;
 import org.wso2.carbon.user.api.UserStoreException;
 import org.wso2.carbon.user.api.UserStoreManager;
+import org.wso2.carbon.user.core.UniqueIDUserStoreManager;
+import org.wso2.carbon.user.core.common.AbstractUserStoreManager;
 import org.wso2.carbon.user.core.service.RealmService;
 import org.wso2.carbon.user.core.util.UserCoreUtil;
 import org.wso2.carbon.utils.multitenancy.MultitenantUtils;
@@ -251,23 +253,9 @@ public class SAML2BearerGrantHandler extends AbstractAuthorizationGrantHandler {
                             localClaimDialect, idPClaimMappings);
                 }
 
-                // Handle IdP Role Mappings
-                if (localClaims != null && StringUtils
-                        .isNotBlank(localClaims.get(FrameworkConstants.LOCAL_ROLE_CLAIM_URI))) {
-
-                    String updatedRoleClaimValue = getUpdatedRoleClaimValue(identityProvider,
-                            localClaims.get(FrameworkConstants.LOCAL_ROLE_CLAIM_URI));
-                    if (updatedRoleClaimValue != null) {
-                        localClaims.put(FrameworkConstants.LOCAL_ROLE_CLAIM_URI, updatedRoleClaimValue);
-                    } else {
-                        localClaims.remove(FrameworkConstants.LOCAL_ROLE_CLAIM_URI);
-                        if (localClaims.isEmpty()) {
-                            // This is added to handle situation where removing all role mappings and requesting
-                            // the id token using same SAML assertion.
-                            addUserAttributesToCache(responseDTO, tokenReqMsgCtx,
-                                    new HashMap<ClaimMapping, String>());
-                        }
-                    }
+                // Handle IdP Role Mappings, for all the claims that contain roles, groups, or both.
+                for (String roleGroupClaim : IdentityUtil.getRoleGroupClaims()) {
+                    handleIdPRoleMapping(tokenReqMsgCtx, responseDTO, identityProvider, localClaims, roleGroupClaim);
                 }
 
                 // ########################### all claims are in local dialect ############################
@@ -293,9 +281,9 @@ public class SAML2BearerGrantHandler extends AbstractAuthorizationGrantHandler {
                         .iterator(); iterator.hasNext(); ) {
 
                     Map.Entry<ClaimMapping, String> entry = iterator.next();
-                    if (FrameworkConstants.LOCAL_ROLE_CLAIM_URI
-                            .equals(entry.getKey().getLocalClaim().getClaimUri()) && StringUtils
-                            .isNotBlank(entry.getValue())) {
+                    if (IdentityUtil.getRoleGroupClaims().stream().anyMatch(roleGroupClaim -> roleGroupClaim.
+                            equals(entry.getKey().getLocalClaim().getClaimUri())) && StringUtils.isNotBlank(
+                                    entry.getValue())) {
 
                         IdentityProvider identityProvider = getIdentityProvider(assertion, tenantDomain);
                         String updatedRoleClaimValue = getUpdatedRoleClaimValue(identityProvider,
@@ -550,10 +538,24 @@ public class SAML2BearerGrantHandler extends AbstractAuthorizationGrantHandler {
     protected void validateSignatureAgainstIdpCertificate(Assertion assertion, String tenantDomain,
                                                           IdentityProvider identityProvider)
             throws IdentityOAuth2Exception {
-        X509Certificate x509Certificate = getIdpCertificate(tenantDomain, identityProvider);
-        try {
-            X509Credential x509Credential = new X509CredentialImpl(x509Certificate);
 
+        boolean isExceptionThrown = false;
+        SignatureException signatureException = null;
+
+        CertificateInfo[] certificateInfos = identityProvider.getCertificateInfoArray();
+        if (log.isDebugEnabled()) {
+            log.debug(certificateInfos.length + " certificates found for Identity Provider " +
+                    identityProvider.getIdentityProviderName());
+        }
+
+        if (ArrayUtils.isEmpty(certificateInfos)) {
+            // Preserving the old behaviour of throwing an exception if there was no certificate available
+            // when signature validation was done only for one certificate.
+            throw new IdentityOAuth2Exception("No certificates found for Identity Provider "
+                    + identityProvider.getIdentityProviderName() + " of tenant domain " + tenantDomain);
+        }
+
+        try {
             /*
               The process mentioned below is done because OpenSAML3 does not support OSGi refer
               https://shibboleth.1660669.n2.nabble.com/Null-Pointer-Exception-from-UnmarshallerFactory-while-migrating
@@ -567,7 +569,39 @@ public class SAML2BearerGrantHandler extends AbstractAuthorizationGrantHandler {
             thread.setContextClassLoader(SignatureValidationProvider.class.getClassLoader());
 
             try {
-                SignatureValidator.validate(assertion.getSignature(), x509Credential);
+                int index = 0;
+                for (CertificateInfo certificateInfo : certificateInfos) {
+                    X509Certificate x509Certificate = getIdpCertificate(tenantDomain, identityProvider,
+                            certificateInfo);
+                    X509Credential x509Credential = new X509CredentialImpl(x509Certificate);
+
+                    try {
+                        if (log.isDebugEnabled()) {
+                            log.debug("Validating the signature with certificate " + certificateInfo.getThumbPrint()
+                                    + " at index: " + index);
+                        }
+                        SignatureValidator.validate(assertion.getSignature(), x509Credential);
+                        isExceptionThrown = false;
+                        break;
+                    } catch (SignatureException e) {
+                        if (log.isDebugEnabled()) {
+                            log.debug("Signature validation failed with certificate " + certificateInfo.getThumbPrint()
+                                    + " at index: " + index);
+                        }
+                        isExceptionThrown = true;
+                        if (signatureException == null) {
+                            signatureException = e;
+                        } else {
+                            signatureException.addSuppressed(e);
+                        }
+                    }
+                    index++;
+                }
+                // If all the certification validation fails, then throw the exception.
+                if (isExceptionThrown) {
+                    throw signatureException;
+                }
+
             } finally {
                 thread.setContextClassLoader(originalClassLoader);
             }
@@ -576,15 +610,17 @@ public class SAML2BearerGrantHandler extends AbstractAuthorizationGrantHandler {
         }
     }
 
-    private X509Certificate getIdpCertificate(String tenantDomain, IdentityProvider identityProvider)
-            throws IdentityOAuth2Exception {
+    private X509Certificate getIdpCertificate(String tenantDomain, IdentityProvider identityProvider,
+                                              CertificateInfo certificateInfo) throws IdentityOAuth2Exception {
+
         X509Certificate x509Certificate;
         try {
             x509Certificate = (X509Certificate) IdentityApplicationManagementUtil
-                    .decodeCertificate(identityProvider.getCertificate());
+                    .decodeCertificate(certificateInfo.getCertValue());
         } catch (CertificateException e) {
-            throw new IdentityOAuth2Exception("Error occurred while decoding public certificate of Identity Provider "
-                    + identityProvider.getIdentityProviderName() + " for tenant domain " + tenantDomain, e);
+            throw new IdentityOAuth2Exception("Error occurred while decoding public certificate with thumbprint " +
+                    certificateInfo.getThumbPrint() + " of Identity Provider " +
+                    identityProvider.getIdentityProviderName() + " for tenant domain " + tenantDomain, e);
         }
         return x509Certificate;
     }
@@ -785,7 +821,6 @@ public class SAML2BearerGrantHandler extends AbstractAuthorizationGrantHandler {
                                                   String tenantDomain) throws IdentityOAuth2Exception {
         String tokenEndpointAlias = null;
         FederatedAuthenticatorConfig[] fedAuthnConfigs = identityProvider.getFederatedAuthenticatorConfigs();
-        //validateIdpEntityId(assertion, tenantDomain,  getIdpEntityId(fedAuthnConfigs));
         // Get OpenIDConnect authenticator == OAuth
         // authenticator
         FederatedAuthenticatorConfig oauthAuthenticatorConfig =
@@ -945,6 +980,14 @@ public class SAML2BearerGrantHandler extends AbstractAuthorizationGrantHandler {
         return false;
     }
 
+    /**
+     * Get the corresponding SAML service provider using the issuer name.
+     *
+     * @param issuerName    SAML assertion issuer.
+     * @param tenantDomain  Tenant Domain.
+     * @return SAML Service Provider
+     * @throws IdentityOAuth2Exception
+     */
     private SAMLSSOServiceProviderDO getSAMLSSOServiceProvider(String issuerName, String tenantDomain)
             throws IdentityOAuth2Exception {
 
@@ -1274,6 +1317,10 @@ public class SAML2BearerGrantHandler extends AbstractAuthorizationGrantHandler {
 
         userStoreManager = realmService.getTenantUserRealm(IdentityTenantUtil.getTenantId(authenticatedUser
                 .getTenantDomain())).getUserStoreManager();
+        if (userStoreManager instanceof AbstractUserStoreManager &&
+                ((AbstractUserStoreManager) userStoreManager).isUniqueUserIdEnabled()) {
+            authenticatedUser.setUserId(authenticatedUser.getAuthenticatedSubjectIdentifier());
+        }
 
         if (log.isDebugEnabled()) {
             log.debug("Checking whether the user exists in local user store");
@@ -1291,6 +1338,11 @@ public class SAML2BearerGrantHandler extends AbstractAuthorizationGrantHandler {
     private boolean userDoesNotExist(UserStoreManager userStoreManager, AuthenticatedUser authenticatedUser)
             throws UserStoreException {
 
+        if (userStoreManager instanceof AbstractUserStoreManager &&
+                ((AbstractUserStoreManager) userStoreManager).isUniqueUserIdEnabled()) {
+            return !((UniqueIDUserStoreManager) userStoreManager).isExistingUserWithID
+                    (authenticatedUser.getAuthenticatedSubjectIdentifier());
+        }
         return !userStoreManager.isExistingUser(authenticatedUser.getUsernameAsSubjectIdentifier(true, false));
     }
 
@@ -1313,9 +1365,11 @@ public class SAML2BearerGrantHandler extends AbstractAuthorizationGrantHandler {
         if (log.isDebugEnabled()) {
             log.debug("Building local user with assertion subject : " + subjectIdentifier);
         }
-        authenticatedUser.setUserStoreDomain(UserCoreUtil.extractDomainFromName(subjectIdentifier));
-        authenticatedUser.setUserName(MultitenantUtils.getTenantAwareUsername(UserCoreUtil.removeDomainFromName
-                (subjectIdentifier)));
+        String userStoreDomain = UserCoreUtil.extractDomainFromName(subjectIdentifier);
+        authenticatedUser.setUserStoreDomain(userStoreDomain);
+        String tenantAwareUsername = MultitenantUtils.getTenantAwareUsername(UserCoreUtil.removeDomainFromName
+                (subjectIdentifier));
+        authenticatedUser.setUserName(tenantAwareUsername);
 
         userTenantDomain = MultitenantUtils.getTenantDomain(subjectIdentifier);
         // From above method userTenantDomain cannot be empty.
@@ -1329,6 +1383,7 @@ public class SAML2BearerGrantHandler extends AbstractAuthorizationGrantHandler {
         authenticatedUser.setAuthenticatedSubjectIdentifier(authenticatedUser.getUserName(), serviceProvider);
         authenticatedUser.setFederatedIdPName(getIdentityProvider(assertion, getTenantDomain(tokReqMsgCtx))
                 .getIdentityProviderName());
+
         return authenticatedUser;
     }
 
@@ -1442,5 +1497,28 @@ public class SAML2BearerGrantHandler extends AbstractAuthorizationGrantHandler {
         return StringUtils.isNotBlank(keyStoreLocation) && StringUtils.isNotBlank(keyStoreType) && StringUtils
                 .isNotBlank(keyStorePassword) && StringUtils.isNotBlank(keyAlias) && StringUtils
                 .isNotBlank(keyPassword);
+    }
+
+    private void handleIdPRoleMapping(OAuthTokenReqMessageContext tokenReqMsgCtx, OAuth2AccessTokenRespDTO responseDTO,
+                                      IdentityProvider identityProvider, Map<String, String> localClaims,
+                                      String roleClaimURI) {
+
+        if (localClaims != null && StringUtils
+                .isNotBlank(localClaims.get(roleClaimURI))) {
+
+            String updatedRoleClaimValue = getUpdatedRoleClaimValue(identityProvider,
+                    localClaims.get(roleClaimURI));
+            if (updatedRoleClaimValue != null) {
+                localClaims.put(roleClaimURI, updatedRoleClaimValue);
+            } else {
+                localClaims.remove(roleClaimURI);
+                if (localClaims.isEmpty()) {
+                    // This is added to handle situation where removing all role mappings and requesting
+                    // the id token using same SAML assertion.
+                    addUserAttributesToCache(responseDTO, tokenReqMsgCtx,
+                            new HashMap<ClaimMapping, String>());
+                }
+            }
+        }
     }
 }

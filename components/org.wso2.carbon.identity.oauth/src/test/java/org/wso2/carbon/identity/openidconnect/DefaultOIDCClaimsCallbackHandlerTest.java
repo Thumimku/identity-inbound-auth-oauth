@@ -61,6 +61,7 @@ import org.wso2.carbon.identity.oauth.cache.AuthorizationGrantCacheEntry;
 import org.wso2.carbon.identity.oauth.cache.AuthorizationGrantCacheKey;
 import org.wso2.carbon.identity.oauth.common.OAuthConstants;
 import org.wso2.carbon.identity.oauth.config.OAuthServerConfiguration;
+import org.wso2.carbon.identity.oauth2.IdentityOAuth2Exception;
 import org.wso2.carbon.identity.oauth2.TestConstants;
 import org.wso2.carbon.identity.oauth2.authz.OAuthAuthzReqMessageContext;
 import org.wso2.carbon.identity.oauth2.dto.OAuth2AccessTokenReqDTO;
@@ -69,6 +70,7 @@ import org.wso2.carbon.identity.oauth2.internal.OAuth2ServiceComponentHolder;
 import org.wso2.carbon.identity.oauth2.model.RefreshTokenValidationDataDO;
 import org.wso2.carbon.identity.oauth2.token.OAuthTokenReqMessageContext;
 import org.wso2.carbon.identity.oauth2.token.handlers.grant.saml.SAML2BearerGrantHandlerTest;
+import org.wso2.carbon.identity.openidconnect.dao.ScopeClaimMappingDAOImpl;
 import org.wso2.carbon.identity.openidconnect.internal.OpenIDConnectServiceComponentHolder;
 import org.wso2.carbon.identity.openidconnect.model.RequestedClaim;
 import org.wso2.carbon.user.core.UserRealm;
@@ -256,7 +258,7 @@ public class DefaultOIDCClaimsCallbackHandlerTest {
 
         OpenIDConnectServiceComponentHolder.setRequestObjectService(requestObjectService);
         defaultOIDCClaimsCallbackHandler = new DefaultOIDCClaimsCallbackHandler();
-
+        OAuth2ServiceComponentHolder.getInstance().setScopeClaimMappingDAO(new ScopeClaimMappingDAOImpl());
     }
 
     public static String getFilePath(String fileName) {
@@ -714,6 +716,7 @@ public class DefaultOIDCClaimsCallbackHandlerTest {
 
         mockStatic(IdentityTenantUtil.class);
         when(IdentityTenantUtil.getTenantId(TENANT_DOMAIN)).thenReturn(TENANT_ID);
+        when(IdentityTenantUtil.getTenantDomain(TENANT_ID)).thenReturn(TENANT_DOMAIN);
         when(IdentityTenantUtil.getRealm(TENANT_DOMAIN, username)).thenReturn(userRealm);
     }
 
@@ -884,6 +887,11 @@ public class DefaultOIDCClaimsCallbackHandlerTest {
         serviceProvider.setClaimConfig(claimConfig);
         serviceProvider.setSpProperties(new ServiceProviderProperty[]{});
 
+        OAuthServerConfiguration mockOAuthServerConfiguration = PowerMockito.mock(OAuthServerConfiguration.class);
+        mockStatic(OAuthServerConfiguration.class);
+        when(OAuthServerConfiguration.getInstance()).thenReturn(mockOAuthServerConfiguration);
+        when(mockOAuthServerConfiguration.getOpenIDConnectSkipeUserConsentConfig()).thenReturn(true);
+
         mockApplicationManagementService(serviceProvider);
 
         JWTClaimsSet jwtClaimsSet = defaultOIDCClaimsCallbackHandler.handleCustomClaims(jwtClaimsSetBuilder,
@@ -927,10 +935,35 @@ public class DefaultOIDCClaimsCallbackHandlerTest {
 
     }
 
+    @Test
+    public void testHandleClaimsForOAuthTokenReqMessageContextWithAuthorizationCode() throws Exception {
+
+        JWTClaimsSet.Builder jwtClaimsSetBuilder = new JWTClaimsSet.Builder();
+        Map<ClaimMapping, String> userAttributes = new HashMap<>();
+        userAttributes.put(SAML2BearerGrantHandlerTest.buildClaimMapping(COUNTRY), TestConstants.CLAIM_VALUE1);
+        userAttributes.put(SAML2BearerGrantHandlerTest.buildClaimMapping(EMAIL), TestConstants.CLAIM_VALUE2);
+        OAuthTokenReqMessageContext requestMsgCtx = getTokenReqMessageContextForFederatedUser(userAttributes);
+        requestMsgCtx.addProperty("AuthorizationCode", "dummyAuthorizationCode");
+
+        AuthorizationGrantCacheEntry authorizationGrantCacheEntry = mock(AuthorizationGrantCacheEntry.class);
+        mockAuthorizationGrantCache(authorizationGrantCacheEntry);
+
+        UserRealm userRealm = getUserRealmWithUserClaims(USER_CLAIMS_MAP);
+        mockUserRealm(requestMsgCtx.getAuthorizedUser().toString(), userRealm);
+        JWTClaimsSet jwtClaimsSet = getJwtClaimSet(jwtClaimsSetBuilder, requestMsgCtx);
+        assertNotNull(jwtClaimsSet, "JWT Custom claim handling failed.");
+        assertFalse(jwtClaimsSet.getClaims().isEmpty(), "JWT custom claim handling failed");
+        Assert.assertEquals(jwtClaimsSet.getClaims().size(), 3,
+                "Expected custom claims are not set.");
+        Assert.assertEquals(jwtClaimsSet.getClaim(EMAIL), TestConstants.CLAIM_VALUE2,
+                "OIDC claim " + EMAIL + " is not added with the JWT token");
+    }
+
     private AuthenticatedUser getDefaultAuthenticatedLocalUser() {
 
         AuthenticatedUser authenticatedUser = new AuthenticatedUser();
         authenticatedUser.setUserName(USER_NAME);
+        authenticatedUser.setUserId(StringUtils.EMPTY);
         authenticatedUser.setUserStoreDomain(USER_STORE_DOMAIN);
         authenticatedUser.setTenantDomain(TENANT_DOMAIN);
         authenticatedUser.setFederatedUser(false);
@@ -941,6 +974,7 @@ public class DefaultOIDCClaimsCallbackHandlerTest {
 
         AuthenticatedUser authenticatedUser = new AuthenticatedUser();
         authenticatedUser.setUserName(USER_NAME);
+        authenticatedUser.setUserId(StringUtils.EMPTY);
         authenticatedUser.setFederatedUser(true);
         return authenticatedUser;
     }
@@ -971,7 +1005,7 @@ public class DefaultOIDCClaimsCallbackHandlerTest {
     }
 
     private JWTClaimsSet getJwtClaimSet(JWTClaimsSet.Builder jwtClaimsSetBuilder,
-                                        OAuthTokenReqMessageContext requestMsgCtx) {
+                                        OAuthTokenReqMessageContext requestMsgCtx) throws IdentityOAuth2Exception {
 
         OAuthServerConfiguration mockOAuthServerConfiguration = PowerMockito.mock(OAuthServerConfiguration.class);
         DataSource dataSource = mock(DataSource.class);
@@ -1012,7 +1046,7 @@ public class DefaultOIDCClaimsCallbackHandlerTest {
     }
 
     private JWTClaimsSet getJwtClaimSet(JWTClaimsSet.Builder jwtClaimsSetBuilder,
-                                        OAuthAuthzReqMessageContext requestMsgCtx) {
+                                        OAuthAuthzReqMessageContext requestMsgCtx) throws IdentityOAuth2Exception {
 
         OAuthServerConfiguration mockOAuthServerConfiguration = PowerMockito.mock(OAuthServerConfiguration.class);
         DataSource dataSource = mock(DataSource.class);
@@ -1021,6 +1055,7 @@ public class DefaultOIDCClaimsCallbackHandlerTest {
         mockStatic(OAuthServerConfiguration.class);
         when(OAuthServerConfiguration.getInstance()).thenReturn(mockOAuthServerConfiguration);
         when(mockOAuthServerConfiguration.isConvertOriginalClaimsFromAssertionsToOIDCDialect()).thenReturn(true);
+        when(mockOAuthServerConfiguration.getOpenIDConnectSkipeUserConsentConfig()).thenReturn(true);
         JWTClaimsSet jwtClaimsSet = null;
         try {
 

@@ -45,6 +45,7 @@ import org.wso2.carbon.identity.oauth.dcr.util.DCRMUtils;
 import org.wso2.carbon.identity.oauth.dcr.util.ErrorCodes;
 import org.wso2.carbon.identity.oauth.dto.OAuthConsumerAppDTO;
 import org.wso2.carbon.registry.core.Registry;
+import org.wso2.carbon.user.core.util.UserCoreUtil;
 import org.wso2.carbon.utils.multitenancy.MultitenantUtils;
 
 import java.util.ArrayList;
@@ -54,6 +55,7 @@ import java.util.List;
 /**
  * OAuth DCR Management class used to manage OAuth application registration.
  */
+@Deprecated
 public class DCRManagementService {
 
     private static final Log log = LogFactory.getLog(DCRManagementService.class);
@@ -98,7 +100,6 @@ public class DCRManagementService {
         }
 
         RegistrationResponseProfile info = this.createOAuthApplication(profile);
-
         return info;
     }
 
@@ -139,7 +140,8 @@ public class DCRManagementService {
             ServiceProvider serviceProvider = new ServiceProvider();
             serviceProvider.setApplicationName(applicationName);
             User user = new User();
-            user.setUserName(userName);
+            user.setUserName(UserCoreUtil.removeDomainFromName(userName));
+            user.setUserStoreDomain(UserCoreUtil.extractDomainFromName(userName));
             user.setTenantDomain(profile.getTenantDomain());
             serviceProvider.setOwner(user);
             serviceProvider.setDescription("Service Provider for application " + applicationName);

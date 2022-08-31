@@ -17,19 +17,26 @@
 package org.wso2.carbon.identity.oauth2.token;
 
 import com.nimbusds.jose.JWSAlgorithm;
+import com.nimbusds.jose.JWSSigner;
+import com.nimbusds.jose.crypto.RSASSASigner;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.PlainJWT;
+import com.nimbusds.jwt.SignedJWT;
 import org.joda.time.Duration;
 import org.mockito.Mock;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
+import org.powermock.api.mockito.PowerMockito;
 import org.powermock.core.classloader.annotations.PrepareForTest;
 import org.testng.Assert;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
+import org.wso2.carbon.base.CarbonBaseConstants;
 import org.wso2.carbon.identity.application.authentication.framework.model.AuthenticatedUser;
+import org.wso2.carbon.identity.core.util.IdentityTenantUtil;
+import org.wso2.carbon.identity.oauth.common.OAuthConstants;
 import org.wso2.carbon.identity.oauth.common.exception.InvalidOAuthClientException;
 import org.wso2.carbon.identity.oauth.config.OAuthServerConfiguration;
 import org.wso2.carbon.identity.oauth.dao.OAuthAppDO;
@@ -42,6 +49,9 @@ import org.wso2.carbon.identity.oauth2.util.OAuth2Util;
 import org.wso2.carbon.identity.openidconnect.CustomClaimsCallbackHandler;
 import org.wso2.carbon.identity.testutil.powermock.PowerMockIdentityBaseTest;
 
+import java.nio.file.Paths;
+import java.security.KeyStore;
+import java.security.interfaces.RSAPrivateKey;
 import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Collections;
@@ -50,7 +60,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Matchers.any;
+import static org.mockito.Matchers.anyInt;
 import static org.mockito.Matchers.anyObject;
 import static org.mockito.Matchers.anyString;
 import static org.mockito.Mockito.reset;
@@ -64,11 +76,14 @@ import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertNotNull;
 import static org.testng.Assert.assertTrue;
 import static org.testng.Assert.fail;
+import static org.wso2.carbon.identity.openidconnect.util.TestUtils.getKeyStoreFromFile;
 
 @PrepareForTest(
         {
                 OAuthServerConfiguration.class,
-                OAuth2Util.class
+                OAuth2Util.class,
+                JWTTokenIssuer.class,
+                IdentityTenantUtil.class,
         }
 )
 public class JWTTokenIssuerTest extends PowerMockIdentityBaseTest {
@@ -97,6 +112,10 @@ public class JWTTokenIssuerTest extends PowerMockIdentityBaseTest {
     private static final long USER_ACCESS_TOKEN_LIFE_TIME = 9999L;
     private static final long APPLICATION_ACCESS_TOKEN_LIFE_TIME = 7777L;
 
+    private static final String CLAIM_CLIENT_ID = "client_id";
+    private static final String DEFAULT_TYP_HEADER_VALUE = "at+jwt";
+    private static final String THUMBPRINT = "Certificate";
+
     @Mock
     private OAuthServerConfiguration oAuthServerConfiguration;
 
@@ -105,6 +124,10 @@ public class JWTTokenIssuerTest extends PowerMockIdentityBaseTest {
         initMocks(this);
         mockStatic(OAuthServerConfiguration.class);
         when(OAuthServerConfiguration.getInstance()).thenReturn(oAuthServerConfiguration);
+        System.setProperty(
+                CarbonBaseConstants.CARBON_HOME,
+                Paths.get(System.getProperty("user.dir"), "src", "test", "resources").toString()
+                          );
     }
 
     @AfterMethod
@@ -182,7 +205,7 @@ public class JWTTokenIssuerTest extends PowerMockIdentityBaseTest {
     @Test(expectedExceptions = IdentityOAuth2Exception.class)
     public void testCreateJWTClaimSetForInvalidClient() throws Exception {
         mockStatic(OAuth2Util.class);
-        when(OAuth2Util.getAppInformationByClientId(anyString()))
+        when(OAuth2Util.getAppInformationByClientId(nullable(String.class)))
                 .thenThrow(new InvalidOAuthClientException("INVALID_CLIENT"));
         when(oAuthServerConfiguration.getSignatureAlgorithm()).thenReturn(SHA256_WITH_HMAC);
 
@@ -203,6 +226,7 @@ public class JWTTokenIssuerTest extends PowerMockIdentityBaseTest {
         OAuth2AuthorizeReqDTO authorizeReqDTO = new OAuth2AuthorizeReqDTO();
         authorizeReqDTO.setUser(authenticatedUser);
         OAuthAuthzReqMessageContext authzReqMessageContext = new OAuthAuthzReqMessageContext(authorizeReqDTO);
+        authzReqMessageContext.addProperty(OAuthConstants.UserType.USER_TYPE, OAuthConstants.UserType.APPLICATION);
 
         OAuth2AccessTokenReqDTO tokenReqDTO = new OAuth2AccessTokenReqDTO();
         tokenReqDTO.setGrantType(APPLICATION_ACCESS_TOKEN_GRANT_TYPE);
@@ -212,6 +236,7 @@ public class JWTTokenIssuerTest extends PowerMockIdentityBaseTest {
         cal.setTime(new Date()); // sets calendar time/date
         cal.add(Calendar.HOUR_OF_DAY, 1); // adds one hour
         tokenReqMessageContext.addProperty(EXPIRY_TIME_JWT, cal.getTime());
+        tokenReqMessageContext.addProperty(OAuthConstants.UserType.USER_TYPE, OAuthConstants.UserType.APPLICATION_USER);
 
         return new Object[][]{
                 {
@@ -241,7 +266,7 @@ public class JWTTokenIssuerTest extends PowerMockIdentityBaseTest {
         mockStatic(OAuth2Util.class);
         when(OAuth2Util.getAppInformationByClientId(anyString())).thenReturn(appDO);
         when(OAuth2Util.getIDTokenIssuer()).thenReturn(ID_TOKEN_ISSUER);
-        when(OAuth2Util.getIdTokenIssuer(anyString())).thenReturn(ID_TOKEN_ISSUER);
+        when(OAuth2Util.getIdTokenIssuer(nullable(String.class))).thenReturn(ID_TOKEN_ISSUER);
         when(OAuth2Util.getOIDCAudience(anyString(), anyObject())).thenReturn(Collections.singletonList
                 (DUMMY_CLIENT_ID));
 
@@ -251,7 +276,8 @@ public class JWTTokenIssuerTest extends PowerMockIdentityBaseTest {
         when(oAuthServerConfiguration.getApplicationAccessTokenValidityPeriodInSeconds())
                 .thenReturn(DEFAULT_APPLICATION_ACCESS_TOKEN_EXPIRY_TIME);
 
-        JWTTokenIssuer jwtTokenIssuer = new JWTTokenIssuer();
+        JWTTokenIssuer jwtTokenIssuer = PowerMockito.spy(new JWTTokenIssuer());
+        PowerMockito.doReturn(sub).when(jwtTokenIssuer, "getSubjectClaim", anyString(), anyString(), any());
         JWTClaimsSet jwtClaimSet = jwtTokenIssuer.createJWTClaimSet(
                 (OAuthAuthzReqMessageContext) authzReqMessageContext,
                 (OAuthTokenReqMessageContext) tokenReqMessageContext,
@@ -262,6 +288,7 @@ public class JWTTokenIssuerTest extends PowerMockIdentityBaseTest {
         assertEquals(jwtClaimSet.getIssuer(), ID_TOKEN_ISSUER);
         assertEquals(jwtClaimSet.getSubject(), sub);
         assertEquals(jwtClaimSet.getClaim("azp"), DUMMY_CLIENT_ID);
+        assertEquals(jwtClaimSet.getClaim(CLAIM_CLIENT_ID), DUMMY_CLIENT_ID);
 
         // Assert whether client id is among audiences
         assertNotNull(jwtClaimSet.getAudience());
@@ -284,8 +311,49 @@ public class JWTTokenIssuerTest extends PowerMockIdentityBaseTest {
 
     }
 
-    @Test
-    public void testSignJWTWithRSA() throws Exception {
+    @Test(dataProvider = "createJWTClaimSetDataProvider")
+    public void testSignJWTWithRSA(Object authzReqMessageContext,
+                                   Object tokenReqMessageContext,
+                                   String sub,
+                                   long expectedExpiry) throws Exception {
+
+            OAuthAppDO appDO = spy(new OAuthAppDO());
+            mockGrantHandlers();
+            mockCustomClaimsCallbackHandler();
+            mockStatic(OAuth2Util.class);
+            when(OAuth2Util.getAppInformationByClientId(anyString())).thenReturn(appDO);
+            when(OAuth2Util.getThumbPrint(anyString(), anyInt())).thenReturn(THUMBPRINT);
+
+            System.setProperty(CarbonBaseConstants.CARBON_HOME,
+                    Paths.get(System.getProperty("user.dir"), "src", "test", "resources").toString());
+            KeyStore wso2KeyStore = getKeyStoreFromFile("wso2carbon.jks", "wso2carbon",
+                    System.getProperty(CarbonBaseConstants.CARBON_HOME));
+            RSAPrivateKey rsaPrivateKey = (RSAPrivateKey) wso2KeyStore.getKey("wso2carbon", "wso2carbon".toCharArray());
+
+            when((OAuth2Util.getPrivateKey(anyString(), anyInt()))).thenReturn(rsaPrivateKey);
+            JWSSigner signer = new RSASSASigner(rsaPrivateKey);
+            when(OAuth2Util.createJWSSigner(any())).thenReturn(signer);
+            when(oAuthServerConfiguration.getSignatureAlgorithm()).thenReturn(SHA256_WITH_RSA);
+
+            mockStatic(IdentityTenantUtil.class);
+            when(IdentityTenantUtil.getTenantId(anyString())).thenReturn(-1234);
+
+            JWTTokenIssuer jwtTokenIssuer = PowerMockito.spy(new JWTTokenIssuer());
+            PowerMockito.doReturn(sub).when(jwtTokenIssuer, "getSubjectClaim", anyString(), anyString(), any());
+            JWTClaimsSet jwtClaimSet = jwtTokenIssuer.createJWTClaimSet(
+                    (OAuthAuthzReqMessageContext) authzReqMessageContext,
+                    (OAuthTokenReqMessageContext) tokenReqMessageContext,
+                    DUMMY_CLIENT_ID
+            );
+
+            String jwtToken = jwtTokenIssuer.signJWT(jwtClaimSet,
+                    (OAuthTokenReqMessageContext) tokenReqMessageContext,
+                    (OAuthAuthzReqMessageContext) authzReqMessageContext);
+            SignedJWT signedJWT = SignedJWT.parse(jwtToken);
+            assertNotNull(jwtToken);
+            assertNotNull(signedJWT.getHeader());
+            assertNotNull(signedJWT.getHeader().getType());
+            assertEquals(signedJWT.getHeader().getType().toString(), DEFAULT_TYP_HEADER_VALUE);
     }
 
     @Test
@@ -499,13 +567,13 @@ public class JWTTokenIssuerTest extends PowerMockIdentityBaseTest {
         assertNotNull(jwtClaimsSet.getClaim("TOKEN_CONTEXT_CLAIM"));
     }
 
-    private void mockCustomClaimsCallbackHandler() {
+    private void mockCustomClaimsCallbackHandler() throws IdentityOAuth2Exception {
         CustomClaimsCallbackHandler claimsCallBackHandler = mock(CustomClaimsCallbackHandler.class);
 
         doAnswer(new Answer<JWTClaimsSet>() {
             @Override
             public JWTClaimsSet answer(InvocationOnMock invocationOnMock) throws Throwable {
-                JWTClaimsSet.Builder claimsSetBuilder = invocationOnMock.getArgumentAt(0, JWTClaimsSet.Builder.class);
+                JWTClaimsSet.Builder claimsSetBuilder = invocationOnMock.getArgument(0);
                 claimsSetBuilder.claim("TOKEN_CONTEXT_CLAIM", true);
                 return claimsSetBuilder.build();
             }
@@ -517,7 +585,7 @@ public class JWTTokenIssuerTest extends PowerMockIdentityBaseTest {
         doAnswer(new Answer<JWTClaimsSet>() {
             @Override
             public JWTClaimsSet answer(InvocationOnMock invocationOnMock) throws Throwable {
-                JWTClaimsSet.Builder claimsSetBuilder = invocationOnMock.getArgumentAt(0, JWTClaimsSet.Builder.class);
+                JWTClaimsSet.Builder claimsSetBuilder = invocationOnMock.getArgument(0);
                 claimsSetBuilder.claim("AUTHZ_CONTEXT_CLAIM", true);
                 return claimsSetBuilder.build();
             }
@@ -526,6 +594,8 @@ public class JWTTokenIssuerTest extends PowerMockIdentityBaseTest {
                 any(OAuthAuthzReqMessageContext.class)
         );
 
-        when(oAuthServerConfiguration.getOpenIDConnectCustomClaimsCallbackHandler()).thenReturn(claimsCallBackHandler);
+        when(oAuthServerConfiguration.getOpenIDConnectCustomClaimsCallbackHandler()).
+                thenReturn(claimsCallBackHandler);
+
     }
 }
