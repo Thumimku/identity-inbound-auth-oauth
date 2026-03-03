@@ -87,6 +87,7 @@ import org.wso2.carbon.identity.oauth2.impersonation.services.ImpersonationConfi
 import org.wso2.carbon.identity.oauth2.impersonation.services.ImpersonationMgtServiceImpl;
 import org.wso2.carbon.identity.oauth2.impersonation.services.ImpersonationNotificationMgtService;
 import org.wso2.carbon.identity.oauth2.impersonation.services.ImpersonationNotificationMgtServiceImpl;
+import org.wso2.carbon.identity.oauth2.impersonation.validators.ImpersonationSmsOtpValidator;
 import org.wso2.carbon.identity.oauth2.impersonation.validators.ImpersonationValidator;
 import org.wso2.carbon.identity.oauth2.impersonation.validators.ImpersonatorPermissionValidator;
 import org.wso2.carbon.identity.oauth2.impersonation.validators.ResidentOrganizationValidator;
@@ -425,6 +426,7 @@ public class OAuth2ServiceComponent {
             bundleContext.registerService(ImpersonationValidator.class, new ImpersonatorPermissionValidator(), null);
             bundleContext.registerService(ImpersonationValidator.class, new UserAccountStatusValidator(), null);
             bundleContext.registerService(ImpersonationValidator.class, new ResidentOrganizationValidator(), null);
+            bundleContext.registerService(ImpersonationValidator.class, new ImpersonationSmsOtpValidator(), null);
             bundleContext.registerService(ImpersonationConfigMgtService.class, new ImpersonationConfigMgtServiceImpl(),
                     null);
             bundleContext.registerService(ImpersonationNotificationMgtService.class,
