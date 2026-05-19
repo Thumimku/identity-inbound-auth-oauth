@@ -6994,6 +6994,28 @@ public class OAuth2Util {
     }
 
     /**
+     * Evaluate whether refresh tokens should be renewed, using the app-level override when set and falling back to
+     * the global identity.xml configuration.
+     *
+     * @param renewRefreshToken App-specific renew-refresh-token value from {@code IDN_OIDC_PROPERTY}; may be blank.
+     * @return {@code true} if refresh tokens should be renewed.
+     */
+    public static boolean isRenewRefreshToken(String renewRefreshToken) {
+
+        if (StringUtils.isNotBlank(renewRefreshToken)) {
+            if (log.isDebugEnabled()) {
+                log.debug("Reading the Oauth application specific renew refresh token value as " + renewRefreshToken
+                        + " from the IDN_OIDC_PROPERTY table.");
+            }
+            return Boolean.parseBoolean(renewRefreshToken);
+        }
+        if (log.isDebugEnabled()) {
+            log.debug("Reading the global renew refresh token value from the identity.xml");
+        }
+        return OAuthServerConfiguration.getInstance().isRefreshTokenRenewalEnabled();
+    }
+
+    /**
      * Extracts the user identifier (username) from the token request parameters.
      *
      * @param tokenReq OAuth2AccessTokenReqDTO containing the token request parameters.

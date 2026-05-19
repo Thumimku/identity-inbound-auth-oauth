@@ -474,6 +474,7 @@ public final class OAuthConstants {
         public static final String TOKEN_STATE_REVOKED = "REVOKED";
         public static final String TOKEN_STATE_EXPIRED = "EXPIRED";
         public static final String TOKEN_STATE_INACTIVE = "INACTIVE";
+        public static final String TOKEN_STATE_GRACEFULLY_ROTATED = "GRACEFULLY_ROTATED";
 
         private TokenStates() {
 
@@ -680,6 +681,29 @@ public final class OAuthConstants {
 
         public static final String ISSUER_ORGANIZATION = "issuerOrg";
         private OIDCConfigProperties() {
+
+        }
+    }
+
+    /**
+     * Graceful refresh token rotation constants.
+     */
+    public static class GracefulRefreshTokenRotation {
+
+        public static final String IS_GRACEFUL_REFRESH_TOKEN_ROTATION_ENABLED = "isGracefulRefreshTokenRotationEnabled";
+        public static final String GRACEFUL_REFRESH_TOKEN_ROTATION_VALIDITY_PERIOD =
+                "gracefulRefreshTokenRotationValidityPeriod";
+        public static final int GRACEFUL_REFRESH_TOKEN_ROTATION_VALIDITY_PERIOD_VALUE = 30;
+        public static final int GRACEFUL_REFRESH_TOKEN_ROTATION_VALIDITY_PERIOD_SEALING_VALUE = 60;
+        public static final String GRACEFUL_REFRESH_TOKEN_REUSE_LIMIT = "gracefulRefreshTokenReuseLimit";
+        public static final int GRACEFUL_REFRESH_TOKEN_REUSE_LIMIT_DEFAULT_VALUE = 5;
+        public static final int GRACEFUL_REFRESH_TOKEN_REUSE_LIMIT_MAX_VALUE = 5;
+        public static final int GRACEFUL_REFRESH_TOKEN_REUSE_LIMIT_MIN_VALUE = 1;
+        public static final String GRACEFUL_REFRESH_TOKEN_REUSE_COUNT = "gracefulRefreshTokenReuseCount";
+        public static final String GRACEFUL_REFRESH_TOKEN_ORIGINAL_VALIDITY_IN_MILLIS =
+                "gracefulRefreshTokenOriginalValidityInMillis";
+
+        private GracefulRefreshTokenRotation() {
 
         }
     }

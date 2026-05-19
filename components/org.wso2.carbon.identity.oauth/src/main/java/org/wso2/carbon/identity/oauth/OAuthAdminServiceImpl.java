@@ -582,6 +582,12 @@ public class OAuthAdminServiceImpl {
                         app.setFapiConformanceEnabled(application.isFapiConformanceEnabled());
                         app.setSubjectTokenEnabled(application.isSubjectTokenEnabled());
                         app.setSubjectTokenExpiryTime(application.getSubjectTokenExpiryTime());
+                        app.setGracefulRefreshTokenRotationEnabled(
+                                application.isGracefulRefreshTokenRotationEnabled());
+                        app.setGracefulRefreshTokenRotationValidityPeriod(
+                                application.getGracefulRefreshTokenRotationValidityPeriod());
+                        app.setGracefulRefreshTokenReuseLimit(
+                                application.getGracefulRefreshTokenReuseLimit());
                         app.setJwtScopeAsArrayEnabled(application.isJwtScopeAsArrayEnabled());
                         if (isAccessTokenClaimsSeparationFeatureEnabled()) {
                             validateAccessTokenClaims(application, tenantDomain);
@@ -1078,6 +1084,11 @@ public class OAuthAdminServiceImpl {
             oAuthAppDO.setRequirePushedAuthorizationRequests(consumerAppDTO.getRequirePushedAuthorizationRequests());
             oAuthAppDO.setSubjectTokenEnabled(consumerAppDTO.isSubjectTokenEnabled());
             oAuthAppDO.setSubjectTokenExpiryTime(consumerAppDTO.getSubjectTokenExpiryTime());
+            oAuthAppDO.setGracefulRefreshTokenRotationEnabled(
+                    consumerAppDTO.isGracefulRefreshTokenRotationEnabled());
+            oAuthAppDO.setGracefulRefreshTokenRotationValidityPeriod(
+                    consumerAppDTO.getGracefulRefreshTokenRotationValidityPeriod());
+            oAuthAppDO.setGracefulRefreshTokenReuseLimit(consumerAppDTO.getGracefulRefreshTokenReuseLimit());
             oAuthAppDO.setJwtScopeAsArrayEnabled(consumerAppDTO.isJwtScopeAsArrayEnabled());
 
             if (isAccessTokenClaimsSeparationFeatureEnabled()) {

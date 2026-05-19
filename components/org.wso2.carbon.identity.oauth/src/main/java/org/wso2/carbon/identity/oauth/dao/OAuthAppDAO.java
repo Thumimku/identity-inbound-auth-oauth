@@ -79,6 +79,14 @@ import java.util.Set;
 
 import static org.wso2.carbon.identity.oauth.OAuthUtil.handleError;
 import static org.wso2.carbon.identity.oauth.common.OAuthConstants.ENABLE_CLAIMS_SEPARATION_FOR_ACCESS_TOKEN;
+import static org.wso2.carbon.identity.oauth.common.OAuthConstants.GracefulRefreshTokenRotation.GRACEFUL_REFRESH_TOKEN_REUSE_LIMIT;
+import static org.wso2.carbon.identity.oauth.common.OAuthConstants.GracefulRefreshTokenRotation.GRACEFUL_REFRESH_TOKEN_REUSE_LIMIT_DEFAULT_VALUE;
+import static org.wso2.carbon.identity.oauth.common.OAuthConstants.GracefulRefreshTokenRotation.GRACEFUL_REFRESH_TOKEN_REUSE_LIMIT_MAX_VALUE;
+import static org.wso2.carbon.identity.oauth.common.OAuthConstants.GracefulRefreshTokenRotation.GRACEFUL_REFRESH_TOKEN_REUSE_LIMIT_MIN_VALUE;
+import static org.wso2.carbon.identity.oauth.common.OAuthConstants.GracefulRefreshTokenRotation.GRACEFUL_REFRESH_TOKEN_ROTATION_VALIDITY_PERIOD;
+import static org.wso2.carbon.identity.oauth.common.OAuthConstants.GracefulRefreshTokenRotation.GRACEFUL_REFRESH_TOKEN_ROTATION_VALIDITY_PERIOD_SEALING_VALUE;
+import static org.wso2.carbon.identity.oauth.common.OAuthConstants.GracefulRefreshTokenRotation.GRACEFUL_REFRESH_TOKEN_ROTATION_VALIDITY_PERIOD_VALUE;
+import static org.wso2.carbon.identity.oauth.common.OAuthConstants.GracefulRefreshTokenRotation.IS_GRACEFUL_REFRESH_TOKEN_ROTATION_ENABLED;
 import static org.wso2.carbon.identity.oauth.common.OAuthConstants.OIDCConfigProperties.BACK_CHANNEL_LOGOUT_URL;
 import static org.wso2.carbon.identity.oauth.common.OAuthConstants.OIDCConfigProperties.BYPASS_CLIENT_CREDENTIALS;
 import static org.wso2.carbon.identity.oauth.common.OAuthConstants.OIDCConfigProperties.CIBA_ALLOW_FEDERATED_USERS;
@@ -1126,6 +1134,23 @@ public class OAuthAppDAO {
                 prepStatementForPropertyAdd, preparedStatementForPropertyUpdate);
 
         addOrUpdateOIDCSpProperty(preprocessedClientId, spTenantId, spOIDCProperties,
+                IS_GRACEFUL_REFRESH_TOKEN_ROTATION_ENABLED,
+                String.valueOf(oauthAppDO.isGracefulRefreshTokenRotationEnabled()),
+                prepStatementForPropertyAdd, preparedStatementForPropertyUpdate);
+
+        normalizeGracefulRotationValidityPeriod(oauthAppDO);
+        addOrUpdateOIDCSpProperty(preprocessedClientId, spTenantId, spOIDCProperties,
+                GRACEFUL_REFRESH_TOKEN_ROTATION_VALIDITY_PERIOD,
+                String.valueOf(oauthAppDO.getGracefulRefreshTokenRotationValidityPeriod()),
+                prepStatementForPropertyAdd, preparedStatementForPropertyUpdate);
+
+        normalizeGracefulReuseLimit(oauthAppDO);
+        addOrUpdateOIDCSpProperty(preprocessedClientId, spTenantId, spOIDCProperties,
+                GRACEFUL_REFRESH_TOKEN_REUSE_LIMIT,
+                String.valueOf(oauthAppDO.getGracefulRefreshTokenReuseLimit()),
+                prepStatementForPropertyAdd, preparedStatementForPropertyUpdate);
+
+        addOrUpdateOIDCSpProperty(preprocessedClientId, spTenantId, spOIDCProperties,
                 ENABLE_JWT_SCOPE_AS_ARRAY, String.valueOf(oauthAppDO.isJwtScopeAsArrayEnabled()),
                 prepStatementForPropertyAdd, preparedStatementForPropertyUpdate);
 
@@ -1182,6 +1207,43 @@ public class OAuthAppDAO {
                     propertyKey, propertyValue);
         }
 
+    }
+
+    private void normalizeGracefulRotationValidityPeriod(OAuthAppDO appDO) {
+
+        if (!appDO.isGracefulRefreshTokenRotationEnabled()) {
+            return;
+        }
+        if (appDO.getGracefulRefreshTokenRotationValidityPeriod() <= 0) {
+            appDO.setGracefulRefreshTokenRotationValidityPeriod(GRACEFUL_REFRESH_TOKEN_ROTATION_VALIDITY_PERIOD_VALUE);
+        } else if (appDO.getGracefulRefreshTokenRotationValidityPeriod() >
+                GRACEFUL_REFRESH_TOKEN_ROTATION_VALIDITY_PERIOD_SEALING_VALUE) {
+            appDO.setGracefulRefreshTokenRotationValidityPeriod(
+                    GRACEFUL_REFRESH_TOKEN_ROTATION_VALIDITY_PERIOD_SEALING_VALUE);
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("The graceful refresh token rotation validity period configured for the application: " +
+                        appDO.getApplicationName() + " is greater than the maximum allowed value. " +
+                        "Hence, setting it to the maximum allowed value: " +
+                        GRACEFUL_REFRESH_TOKEN_ROTATION_VALIDITY_PERIOD_SEALING_VALUE + " seconds.");
+            }
+        }
+    }
+
+    private void normalizeGracefulReuseLimit(OAuthAppDO appDO) {
+
+        int limit = appDO.getGracefulRefreshTokenReuseLimit();
+        if (limit < GRACEFUL_REFRESH_TOKEN_REUSE_LIMIT_MIN_VALUE) {
+            limit = GRACEFUL_REFRESH_TOKEN_REUSE_LIMIT_DEFAULT_VALUE;
+        } else if (limit > GRACEFUL_REFRESH_TOKEN_REUSE_LIMIT_MAX_VALUE) {
+            limit = GRACEFUL_REFRESH_TOKEN_REUSE_LIMIT_MAX_VALUE;
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("The graceful refresh token reuse limit configured for the application: " +
+                        appDO.getApplicationName() + " exceeds the maximum allowed value. " +
+                        "Hence, setting it to the maximum allowed value: " +
+                        GRACEFUL_REFRESH_TOKEN_REUSE_LIMIT_MAX_VALUE + ".");
+            }
+        }
+        appDO.setGracefulRefreshTokenReuseLimit(limit);
     }
 
     private void addToBatchForOIDCPropertyAdd(String consumerKey,
@@ -1888,6 +1950,20 @@ public class OAuthAppDAO {
                     SUBJECT_TOKEN_EXPIRY_TIME, String.valueOf(consumerAppDO.getSubjectTokenExpiryTime()));
 
             addToBatchForOIDCPropertyAdd(processedClientId, spTenantId, prepStmtAddOIDCProperty,
+                    IS_GRACEFUL_REFRESH_TOKEN_ROTATION_ENABLED,
+                    String.valueOf(consumerAppDO.isGracefulRefreshTokenRotationEnabled()));
+
+            normalizeGracefulRotationValidityPeriod(consumerAppDO);
+            addToBatchForOIDCPropertyAdd(processedClientId, spTenantId, prepStmtAddOIDCProperty,
+                    GRACEFUL_REFRESH_TOKEN_ROTATION_VALIDITY_PERIOD,
+                    String.valueOf(consumerAppDO.getGracefulRefreshTokenRotationValidityPeriod()));
+
+            normalizeGracefulReuseLimit(consumerAppDO);
+            addToBatchForOIDCPropertyAdd(processedClientId, spTenantId, prepStmtAddOIDCProperty,
+                    GRACEFUL_REFRESH_TOKEN_REUSE_LIMIT,
+                    String.valueOf(consumerAppDO.getGracefulRefreshTokenReuseLimit()));
+
+            addToBatchForOIDCPropertyAdd(processedClientId, spTenantId, prepStmtAddOIDCProperty,
                     HYBRID_FLOW_ENABLED,
                     String.valueOf(consumerAppDO.isHybridFlowEnabled()));
 
@@ -2103,6 +2179,24 @@ public class OAuthAppDAO {
         String subjectTokenExpiryTime = getFirstPropertyValue(spOIDCProperties, SUBJECT_TOKEN_EXPIRY_TIME);
         if (subjectTokenExpiryTime != null) {
             oauthApp.setSubjectTokenExpiryTime(Integer.parseInt(subjectTokenExpiryTime));
+        }
+
+        String isGracefulRefreshTokenRotationEnabled = getFirstPropertyValue(spOIDCProperties,
+                IS_GRACEFUL_REFRESH_TOKEN_ROTATION_ENABLED);
+        if (isGracefulRefreshTokenRotationEnabled != null) {
+            oauthApp.setGracefulRefreshTokenRotationEnabled(
+                    Boolean.parseBoolean(isGracefulRefreshTokenRotationEnabled));
+        }
+        String gracefulRefreshTokenRotationValidityPeriod = getFirstPropertyValue(spOIDCProperties,
+                GRACEFUL_REFRESH_TOKEN_ROTATION_VALIDITY_PERIOD);
+        if (gracefulRefreshTokenRotationValidityPeriod != null) {
+            oauthApp.setGracefulRefreshTokenRotationValidityPeriod(
+                    Integer.parseInt(gracefulRefreshTokenRotationValidityPeriod));
+        }
+        String gracefulRefreshTokenReuseLimit = getFirstPropertyValue(spOIDCProperties,
+                GRACEFUL_REFRESH_TOKEN_REUSE_LIMIT);
+        if (gracefulRefreshTokenReuseLimit != null) {
+            oauthApp.setGracefulRefreshTokenReuseLimit(Integer.parseInt(gracefulRefreshTokenReuseLimit));
         }
 
         String hybridFlowEnabledProperty = getFirstPropertyValue(spOIDCProperties, HYBRID_FLOW_ENABLED);

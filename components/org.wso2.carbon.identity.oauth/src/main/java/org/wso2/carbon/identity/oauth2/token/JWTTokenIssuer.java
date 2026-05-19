@@ -1019,7 +1019,7 @@ public class JWTTokenIssuer extends OauthTokenIssuerImpl {
         long issuedTimeInMillis = Calendar.getInstance().getTimeInMillis();
 
         if (!OAuthServerConfiguration.getInstance().isExtendRenewedTokenExpiryTimeEnabled() &&
-                !isRenewRefreshToken(oAuthAppDO.getRenewRefreshTokenEnabled())) {
+                !OAuth2Util.isRenewRefreshToken(oAuthAppDO.getRenewRefreshTokenEnabled())) {
             if (validationBean != null && validationBean.getIssuedTime() != null) {
                 issuedTimeInMillis = validationBean.getIssuedTime().getTime();
                 refreshTokenLifeTimeInMillis = validationBean.getValidityPeriodInMillis();
@@ -1063,28 +1063,6 @@ public class JWTTokenIssuer extends OauthTokenIssuerImpl {
         setClaimsForNonPersistence(jwtClaimsSetBuilder, authAuthzReqMessageContext, tokenReqMessageContext,
                 authenticatedUser, oAuthAppDO);
         return jwtClaimsSetBuilder.build();
-    }
-
-    /**
-     * Check whether to renew refresh token expiry time based on application specific and global configuration.
-     *
-     * @param renewRefreshToken Application specific renew refresh token value.
-     * @return true if refresh token expiry time should be renewed; false otherwise.
-     */
-    private boolean isRenewRefreshToken(String renewRefreshToken) {
-
-        if (StringUtils.isNotBlank(renewRefreshToken)) {
-            if (log.isDebugEnabled()) {
-                log.debug("Reading the Oauth application specific renew " +
-                        "refresh token value as " + renewRefreshToken + " from the IDN_OIDC_PROPERTY table");
-            }
-            return Boolean.parseBoolean(renewRefreshToken);
-        } else {
-            if (log.isDebugEnabled()) {
-                log.debug("Reading the global renew refresh token value from the identity.xml");
-            }
-            return OAuthServerConfiguration.getInstance().isRefreshTokenRenewalEnabled();
-        }
     }
 
     /**

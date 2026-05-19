@@ -26,7 +26,6 @@ import org.wso2.carbon.identity.base.IdentityConstants;
 import org.wso2.carbon.identity.core.util.IdentityUtil;
 import org.wso2.carbon.identity.oauth.common.OAuthConstants;
 import org.wso2.carbon.identity.oauth.common.exception.InvalidOAuthClientException;
-import org.wso2.carbon.identity.oauth.config.OAuthServerConfiguration;
 import org.wso2.carbon.identity.oauth.dao.OAuthAppDO;
 import org.wso2.carbon.identity.oauth2.IdentityOAuth2Exception;
 import org.wso2.carbon.identity.oauth2.OAuth2Constants;
@@ -105,7 +104,7 @@ public class HybridRefreshTokenGrantProcessor implements RefreshTokenGrantProces
 
         if (oAuthAppDO.isPresent()) {
             // Check if the application is configured to renew the refresh token during token rotation.
-            if (isRenewRefreshToken(oAuthAppDO.get().getRenewRefreshTokenEnabled())) {
+            if (OAuth2Util.isRenewRefreshToken(oAuthAppDO.get().getRenewRefreshTokenEnabled())) {
 
                 if (OAuth2Util.isRefreshTokenPersistenceEnabled()) {
                     // Invalidate the old refresh token and create a new one within a single DB operation.
@@ -143,7 +142,7 @@ public class HybridRefreshTokenGrantProcessor implements RefreshTokenGrantProces
 
         if (oAuthAppDO.isPresent()) {
             // Check if the application is configured to renew the refresh token during token rotation.
-            if (!isRenewRefreshToken(oAuthAppDO.get().getRenewRefreshTokenEnabled())) {
+            if (!OAuth2Util.isRenewRefreshToken(oAuthAppDO.get().getRenewRefreshTokenEnabled())) {
                 tokenId = validationBean.getTokenId();
             }
         } else {
@@ -204,28 +203,6 @@ public class HybridRefreshTokenGrantProcessor implements RefreshTokenGrantProces
                     "There can be only one refresh token active per user + client + scope combination.");
         }
         return true;
-    }
-
-    /**
-     * Evaluate if renew refresh token.
-     *
-     * @param renewRefreshToken Renew refresh token config value from OAuthApp.
-     * @return Evaluated refresh token state
-     */
-    private boolean isRenewRefreshToken(String renewRefreshToken) {
-
-        if (StringUtils.isNotBlank(renewRefreshToken)) {
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("Reading the Oauth application specific renew refresh token value as " + renewRefreshToken
-                        + " from the IDN_OIDC_PROPERTY table.");
-            }
-            return Boolean.parseBoolean(renewRefreshToken);
-        } else {
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("Reading the global renew refresh token value from the identity.xml");
-            }
-            return OAuthServerConfiguration.getInstance().isRefreshTokenRenewalEnabled();
-        }
     }
 
     @Override

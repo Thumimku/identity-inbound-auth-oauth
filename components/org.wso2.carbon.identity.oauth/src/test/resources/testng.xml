@@ -158,6 +158,7 @@
             <class name="org.wso2.carbon.identity.oauth2.token.handlers.response.FederatedTokenResponseHandlerTest"/>
             <class name="org.wso2.carbon.identity.oauth2.token.handlers.grant.ActorTokenValidatorTest"/>
             <class name="org.wso2.carbon.identity.oauth2.token.handlers.claims.AgentAccessTokenClaimProviderTest"/>
+            <class name="org.wso2.carbon.identity.oauth.tokenprocessor.DefaultRefreshTokenGrantProcessorTest"/>
         </classes>
     </test>
 

@@ -1081,6 +1081,31 @@ public class AccessTokenDAOImpl extends AbstractOAuthDAO implements AccessTokenD
         return dataDO;
     }
 
+    @Override
+    public String getAccessTokenExtendedAttributeValue(String tokenId, String attributeName)
+            throws IdentityOAuth2Exception {
+
+        if (!OAuth2ServiceComponentHolder.isTokenExtendedTableExist()) {
+            return null;
+        }
+        try (Connection connection = IdentityDatabaseUtil.getDBConnection(false);
+             PreparedStatement ps = connection.prepareStatement(
+                     SQLQueries.GET_ACCESS_TOKEN_EXTENDED_ATTRIBUTE_VALUE)) {
+            ps.setString(1, tokenId);
+            ps.setString(2, attributeName);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getString(1);
+                }
+            }
+            return null;
+        } catch (SQLException e) {
+            throw new IdentityOAuth2Exception(
+                    "Error while reading extended attribute '" + attributeName
+                            + "' for token id: " + tokenId, e);
+        }
+    }
+
     private Map<String, String> getAccessTokenExtendedAttributeParameters(String accessTokenIdentifier)
             throws IdentityOAuth2Exception {
 
@@ -2100,6 +2125,190 @@ public class AccessTokenDAOImpl extends AbstractOAuthDAO implements AccessTokenD
             }
 
             cleanupOldAccessToken(oldAccessTokenId);
+        }
+    }
+
+    @Override
+    public void gracefullyRotateAndCreateNewAccessToken(String oldAccessTokenId,
+                                                        Timestamp oldRefreshTokenIssuedTime,
+                                                        long newOldRefreshValidityPeriodInMillis,
+                                                        String oldTokenNewStateId, String oldTokenNewState,
+                                                        String consumerKey,
+                                                        AccessTokenDO accessTokenDO, String userStoreDomain,
+                                                        String grantType,
+                                                        Map<String, String> oldTokenExtendedAttributeUpdates)
+            throws IdentityOAuth2Exception {
+
+        boolean tokenUpdateSuccessful;
+        Connection connection = IdentityDatabaseUtil.getDBConnection(true);
+        try {
+            if (OAuth2ServiceComponentHolder.isConsentedTokenColumnEnabled() && !accessTokenDO.isConsentedToken()) {
+                boolean isPreviousTokenConsented = isPreviousTokenConsented(connection, oldAccessTokenId);
+                accessTokenDO.setIsConsentedToken(isPreviousTokenConsented);
+            }
+
+            // oldTokenNewStateId is null on graceful reuses (newReuseCount > 0) — skip validity/state update to
+            // preserve the grace deadline anchored at the first rotation.
+            if (oldTokenNewStateId != null) {
+                updateRefreshTokenValidityStateAndStateId(connection, oldAccessTokenId,
+                        newOldRefreshValidityPeriodInMillis, oldTokenNewState, oldTokenNewStateId, userStoreDomain);
+            }
+
+            if (!oldTokenExtendedAttributeUpdates.isEmpty()
+                    && OAuth2ServiceComponentHolder.isTokenExtendedTableExist()) {
+                upsertTokenAttributes(connection, oldAccessTokenId, oldTokenExtendedAttributeUpdates);
+            }
+
+            String newAccessToken = accessTokenDO.getAccessToken();
+            insertAccessToken(newAccessToken, consumerKey, accessTokenDO, connection, userStoreDomain);
+
+            IdentityDatabaseUtil.commitTransaction(connection);
+            tokenUpdateSuccessful = true;
+        } catch (SQLException e) {
+            IdentityDatabaseUtil.rollbackTransaction(connection);
+            throw new IdentityOAuth2Exception("Error while gracefully rotating refresh token with attribute update", e);
+        } finally {
+            IdentityDatabaseUtil.closeConnection(connection);
+        }
+
+        if (tokenUpdateSuccessful) {
+            if (StringUtils.equals(grantType, OAuthConstants.GrantTypes.CLIENT_CREDENTIALS) ||
+                    StringUtils.equals(grantType, OAuthConstants.GrantTypes.PASSWORD)) {
+                OAuth2TokenUtil.postRefreshAccessToken(oldAccessTokenId, accessTokenDO.getTokenId(),
+                        OAuthConstants.TokenStates.TOKEN_STATE_INACTIVE, false);
+            } else {
+                OAuth2TokenUtil.postRefreshAccessToken(oldAccessTokenId, accessTokenDO.getTokenId(),
+                        OAuthConstants.TokenStates.TOKEN_STATE_INACTIVE, true);
+            }
+        }
+    }
+
+    /**
+     * Upsert key/value attribute pairs for the given token into IDN_OAUTH2_ACCESS_TOKEN_ATTRIBUTES.
+     * For each entry: UPDATE first; if no row was modified, INSERT.
+     */
+    private void upsertTokenAttributes(Connection connection, String tokenId,
+                                        Map<String, String> attributes) throws SQLException {
+
+        for (Map.Entry<String, String> entry : attributes.entrySet()) {
+            try (PreparedStatement updateStmt = connection.prepareStatement(
+                    SQLQueries.UPDATE_OAUTH2_ACCESS_TOKEN_ATTRIBUTE_VALUE)) {
+                updateStmt.setString(1, entry.getValue());
+                updateStmt.setString(2, tokenId);
+                updateStmt.setString(3, entry.getKey());
+                int rowsUpdated = updateStmt.executeUpdate();
+                if (rowsUpdated == 0) {
+                    try (PreparedStatement insertStmt = connection.prepareStatement(
+                            SQLQueries.INSERT_OAUTH2_TOKEN_ATTRIBUTES)) {
+                        insertStmt.setString(1, entry.getKey());
+                        insertStmt.setString(2, entry.getValue());
+                        insertStmt.setString(3, tokenId);
+                        insertStmt.executeUpdate();
+                    }
+                }
+            }
+        }
+    }
+
+    @Override
+    public List<AccessTokenDO> getActiveAccessTokensByConsumerUserScopeBinding(
+            String consumerKey, AuthenticatedUser authzUser, String userStoreDomain,
+            String scope, String tokenBindingReference) throws IdentityOAuth2Exception {
+
+        if (authzUser == null) {
+            throw new IdentityOAuth2Exception("Invalid user information for given consumerKey: " + consumerKey);
+        }
+        String tenantDomain = getUserResidentTenantDomain(authzUser);
+        int tenantId = OAuth2Util.getTenantId(tenantDomain);
+        boolean isUsernameCaseSensitive =
+                IdentityUtil.isUserStoreCaseSensitive(authzUser.getUserStoreDomain(), tenantId);
+        String tenantAwareUsernameWithNoUserDomain = authzUser.getUserName();
+        userStoreDomain = OAuth2Util.getSanitizedUserStoreDomain(userStoreDomain);
+        String userDomain = OAuth2Util.getUserStoreDomain(authzUser);
+        String authorizedOrganization = authzUser.getAccessingOrganization();
+        if (StringUtils.isBlank(authorizedOrganization)) {
+            authorizedOrganization = OAuthConstants.AuthorizedOrganization.NONE;
+        }
+
+        String sql = SQLQueries.RETRIEVE_ACTIVE_ACCESS_TOKENS_BY_CONSUMER_USER_SCOPE_BINDING;
+        String hashedScope = OAuth2Util.hashScopes(scope);
+        if (hashedScope == null) {
+            sql = sql.replace("TOKEN_SCOPE_HASH = ?", "TOKEN_SCOPE_HASH IS NULL");
+        }
+        sql = OAuth2Util.getTokenPartitionedSqlByUserStore(sql, userStoreDomain);
+        if (!isUsernameCaseSensitive) {
+            sql = sql.replace(AUTHZ_USER, LOWER_AUTHZ_USER);
+        }
+
+        List<AccessTokenDO> result = new ArrayList<>();
+        try (Connection connection = IdentityDatabaseUtil.getDBConnection(false);
+             PreparedStatement prepStmt = connection.prepareStatement(sql)) {
+
+            int idx = 1;
+            prepStmt.setString(idx++, getPersistenceProcessor().getProcessedClientId(consumerKey));
+            prepStmt.setInt(idx++, getAppTenantId(consumerKey));
+            if (isUsernameCaseSensitive) {
+                prepStmt.setString(idx++, tenantAwareUsernameWithNoUserDomain);
+            } else {
+                prepStmt.setString(idx++, tenantAwareUsernameWithNoUserDomain.toLowerCase());
+            }
+            prepStmt.setInt(idx++, tenantId);
+            prepStmt.setString(idx++, userDomain);
+            if (hashedScope != null) {
+                prepStmt.setString(idx++, hashedScope);
+            }
+            prepStmt.setString(idx++, tokenBindingReference);
+            prepStmt.setString(idx, authorizedOrganization);
+
+            try (ResultSet rs = prepStmt.executeQuery()) {
+                while (rs.next()) {
+                    String accessToken = getPersistenceProcessor()
+                            .getPreprocessedAccessTokenIdentifier(rs.getString(1));
+                    String tokenId = rs.getString(2);
+                    Timestamp issuedTime = rs.getTimestamp(3, Calendar.getInstance(TimeZone.getTimeZone(UTC)));
+                    Timestamp refreshTokenIssuedTime = rs.getTimestamp(4, Calendar.getInstance(TimeZone
+                            .getTimeZone(UTC)));
+                    long validityPeriodMillis = rs.getLong(5);
+                    long refreshTokenValidityPeriodMillis = rs.getLong(6);
+                    AccessTokenDO tokenDO = new AccessTokenDO();
+                    tokenDO.setAccessToken(accessToken);
+                    tokenDO.setTokenId(tokenId);
+                    tokenDO.setRefreshTokenIssuedTime(refreshTokenIssuedTime);
+                    tokenDO.setRefreshTokenValidityPeriodInMillis(refreshTokenValidityPeriodMillis);
+                    tokenDO.setIssuedTime(issuedTime);
+                    tokenDO.setValidityPeriodInMillis(validityPeriodMillis);
+                    result.add(tokenDO);
+                }
+            }
+        } catch (SQLException e) {
+            throw new IdentityOAuth2Exception(
+                    "Error retrieving active access tokens for graceful sibling cleanup. Consumer: " + consumerKey, e);
+        }
+        return result;
+    }
+
+    private void updateRefreshTokenValidityStateAndStateId(Connection connection, String tokenId,
+                                                           long refreshTokenValidityPeriodInMillis,
+                                                           String newTokenState, String newTokenStateId,
+                                                           String userStoreDomain)
+            throws IdentityOAuth2Exception, SQLException {
+
+        PreparedStatement prepStmt = null;
+        try {
+            String sql = SQLQueries.UPDATE_REFRESH_TOKEN_VALIDITY_STATE_AND_STATE_ID;
+            sql = OAuth2Util.getTokenPartitionedSqlByUserStore(sql, userStoreDomain);
+            prepStmt = connection.prepareStatement(sql);
+            prepStmt.setLong(1, refreshTokenValidityPeriodInMillis);
+            prepStmt.setString(2, newTokenState);
+            prepStmt.setString(3, newTokenStateId);
+            prepStmt.setString(4, tokenId);
+            prepStmt.executeUpdate();
+        } catch (SQLException e) {
+            IdentityDatabaseUtil.rollbackTransaction(connection);
+            throw new IdentityOAuth2Exception("Error while updating refresh token validity period for token id: "
+                    + tokenId, e);
+        } finally {
+            IdentityDatabaseUtil.closeStatement(prepStmt);
         }
     }
 

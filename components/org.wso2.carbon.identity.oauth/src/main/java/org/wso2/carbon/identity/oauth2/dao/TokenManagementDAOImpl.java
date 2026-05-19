@@ -82,6 +82,7 @@ public class TokenManagementDAOImpl extends AbstractOAuthDAO implements TokenMan
     public static final String LOWER_AUTHZ_USER = "LOWER(AUTHZ_USER)";
     private static final String UTC = "UTC";
     private boolean isHashDisabled = OAuth2Util.isHashDisabled();
+    private static final String CONSENTED_TOKEN_COLUMN_NAME = "CONSENTED_TOKEN";
 
     private static final String IDN_OAUTH2_ACCESS_TOKEN = "IDN_OAUTH2_ACCESS_TOKEN";
 
@@ -109,35 +110,72 @@ public class TokenManagementDAOImpl extends AbstractOAuthDAO implements TokenMan
             boolean isMysqlOrMarinaDBOrH2 =
                     driverName.contains("MySQL") || driverName.contains("MariaDB") || driverName.contains("H2");
 
+            boolean isConsentedTokenColumnEnabled = OAuth2ServiceComponentHolder.isConsentedTokenColumnEnabled();
             if (isAccessTokenExtendedTableExist()) {
-                if (isMysqlOrMarinaDBOrH2) {
-                    sql = SQLQueries.RETRIEVE_ACCESS_TOKEN_VALIDATION_DATA_WITH_EXTENDED_ATTRIBUTES_MYSQL;
-                } else if (connection.getMetaData().getDatabaseProductName().contains("DB2")) {
-                    sql = SQLQueries.RETRIEVE_ACCESS_TOKEN_VALIDATION_DATA_WITH_EXTENDED_ATTRIBUTES_DB2SQL;
-                } else if (driverName.contains("MS SQL")
-                        || driverName.contains("Microsoft")) {
-                    sql = SQLQueries.RETRIEVE_ACCESS_TOKEN_VALIDATION_DATA_WITH_EXTENDED_ATTRIBUTES_MSSQL;
-                } else if (driverName.contains("PostgreSQL")) {
-                    sql = SQLQueries.RETRIEVE_ACCESS_TOKEN_VALIDATION_DATA_WITH_EXTENDED_ATTRIBUTES_POSTGRESQL;
-                } else if (driverName.contains("INFORMIX")) {
-                    sql = SQLQueries.RETRIEVE_ACCESS_TOKEN_VALIDATION_DATA_WITH_EXTENDED_ATTRIBUTES_INFORMIX;
+                if (isConsentedTokenColumnEnabled) {
+                    if (isMysqlOrMarinaDBOrH2) {
+                        sql = SQLQueries
+                                .RETRIEVE_ACCESS_TOKEN_VALIDATION_DATA_WITH_EXTENDED_ATTRIBUTES_CONSENTED_MYSQL;
+                    } else if (connection.getMetaData().getDatabaseProductName().contains("DB2")) {
+                        sql = SQLQueries
+                                .RETRIEVE_ACCESS_TOKEN_VALIDATION_DATA_WITH_EXTENDED_ATTRIBUTES_CONSENTED_DB2SQL;
+                    } else if (driverName.contains("MS SQL") || driverName.contains("Microsoft")) {
+                        sql = SQLQueries
+                                .RETRIEVE_ACCESS_TOKEN_VALIDATION_DATA_WITH_EXTENDED_ATTRIBUTES_CONSENTED_MSSQL;
+                    } else if (driverName.contains("PostgreSQL")) {
+                        sql = SQLQueries
+                                .RETRIEVE_ACCESS_TOKEN_VALIDATION_DATA_WITH_EXTENDED_ATTRIBUTES_CONSENTED_POSTGRESQL;
+                    } else if (driverName.contains("INFORMIX")) {
+                        sql = SQLQueries
+                                .RETRIEVE_ACCESS_TOKEN_VALIDATION_DATA_WITH_EXTENDED_ATTRIBUTES_CONSENTED_INFORMIX;
+                    } else {
+                        sql = SQLQueries
+                                .RETRIEVE_ACCESS_TOKEN_VALIDATION_DATA_WITH_EXTENDED_ATTRIBUTES_CONSENTED_ORACLE;
+                    }
                 } else {
-                    sql = SQLQueries.RETRIEVE_ACCESS_TOKEN_VALIDATION_DATA_WITH_EXTENDED_ATTRIBUTES_ORACLE;
+                    if (isMysqlOrMarinaDBOrH2) {
+                        sql = SQLQueries.RETRIEVE_ACCESS_TOKEN_VALIDATION_DATA_WITH_EXTENDED_ATTRIBUTES_MYSQL;
+                    } else if (connection.getMetaData().getDatabaseProductName().contains("DB2")) {
+                        sql = SQLQueries.RETRIEVE_ACCESS_TOKEN_VALIDATION_DATA_WITH_EXTENDED_ATTRIBUTES_DB2SQL;
+                    } else if (driverName.contains("MS SQL") || driverName.contains("Microsoft")) {
+                        sql = SQLQueries.RETRIEVE_ACCESS_TOKEN_VALIDATION_DATA_WITH_EXTENDED_ATTRIBUTES_MSSQL;
+                    } else if (driverName.contains("PostgreSQL")) {
+                        sql = SQLQueries.RETRIEVE_ACCESS_TOKEN_VALIDATION_DATA_WITH_EXTENDED_ATTRIBUTES_POSTGRESQL;
+                    } else if (driverName.contains("INFORMIX")) {
+                        sql = SQLQueries.RETRIEVE_ACCESS_TOKEN_VALIDATION_DATA_WITH_EXTENDED_ATTRIBUTES_INFORMIX;
+                    } else {
+                        sql = SQLQueries.RETRIEVE_ACCESS_TOKEN_VALIDATION_DATA_WITH_EXTENDED_ATTRIBUTES_ORACLE;
+                    }
                 }
             } else {
-                if (isMysqlOrMarinaDBOrH2) {
-                    sql = SQLQueries.RETRIEVE_ACCESS_TOKEN_VALIDATION_DATA_IDP_NAME_MYSQL;
-                } else if (connection.getMetaData().getDatabaseProductName().contains("DB2")) {
-                    sql = SQLQueries.RETRIEVE_ACCESS_TOKEN_VALIDATION_DATA_IDP_NAME_DB2SQL;
-                } else if (driverName.contains("MS SQL")
-                        || driverName.contains("Microsoft")) {
-                    sql = SQLQueries.RETRIEVE_ACCESS_TOKEN_VALIDATION_DATA_IDP_NAME_MSSQL;
-                } else if (driverName.contains("PostgreSQL")) {
-                    sql = SQLQueries.RETRIEVE_ACCESS_TOKEN_VALIDATION_DATA_IDP_NAME_POSTGRESQL;
-                } else if (driverName.contains("INFORMIX")) {
-                    sql = SQLQueries.RETRIEVE_ACCESS_TOKEN_VALIDATION_DATA_IDP_NAME_INFORMIX;
+                if (isConsentedTokenColumnEnabled) {
+                    if (isMysqlOrMarinaDBOrH2) {
+                        sql = SQLQueries.RETRIEVE_ACCESS_TOKEN_VALIDATION_DATA_IDP_NAME_WITH_CONSENTED_TOKEN_MYSQL;
+                    } else if (connection.getMetaData().getDatabaseProductName().contains("DB2")) {
+                        sql = SQLQueries.RETRIEVE_ACCESS_TOKEN_VALIDATION_DATA_IDP_NAME_WITH_CONSENTED_TOKEN_DB2SQL;
+                    } else if (driverName.contains("MS SQL") || driverName.contains("Microsoft")) {
+                        sql = SQLQueries.RETRIEVE_ACCESS_TOKEN_VALIDATION_DATA_IDP_NAME_WITH_CONSENTED_TOKEN_MSSQL;
+                    } else if (driverName.contains("PostgreSQL")) {
+                        sql = SQLQueries.RETRIEVE_ACCESS_TOKEN_VALIDATION_DATA_IDP_NAME_WITH_CONSENTED_TOKEN_POSTGRESQL;
+                    } else if (driverName.contains("INFORMIX")) {
+                        sql = SQLQueries.RETRIEVE_ACCESS_TOKEN_VALIDATION_DATA_IDP_NAME_WITH_CONSENTED_TOKEN_INFORMIX;
+                    } else {
+                        sql = SQLQueries.RETRIEVE_ACCESS_TOKEN_VALIDATION_DATA_IDP_NAME_WITH_CONSENTED_TOKEN_ORACLE;
+                    }
                 } else {
-                    sql = SQLQueries.RETRIEVE_ACCESS_TOKEN_VALIDATION_DATA_IDP_NAME_ORACLE;
+                    if (isMysqlOrMarinaDBOrH2) {
+                        sql = SQLQueries.RETRIEVE_ACCESS_TOKEN_VALIDATION_DATA_IDP_NAME_MYSQL;
+                    } else if (connection.getMetaData().getDatabaseProductName().contains("DB2")) {
+                        sql = SQLQueries.RETRIEVE_ACCESS_TOKEN_VALIDATION_DATA_IDP_NAME_DB2SQL;
+                    } else if (driverName.contains("MS SQL") || driverName.contains("Microsoft")) {
+                        sql = SQLQueries.RETRIEVE_ACCESS_TOKEN_VALIDATION_DATA_IDP_NAME_MSSQL;
+                    } else if (driverName.contains("PostgreSQL")) {
+                        sql = SQLQueries.RETRIEVE_ACCESS_TOKEN_VALIDATION_DATA_IDP_NAME_POSTGRESQL;
+                    } else if (driverName.contains("INFORMIX")) {
+                        sql = SQLQueries.RETRIEVE_ACCESS_TOKEN_VALIDATION_DATA_IDP_NAME_INFORMIX;
+                    } else {
+                        sql = SQLQueries.RETRIEVE_ACCESS_TOKEN_VALIDATION_DATA_IDP_NAME_ORACLE;
+                    }
                 }
             }
 
@@ -213,6 +251,13 @@ public class TokenManagementDAOImpl extends AbstractOAuthDAO implements TokenMan
                     if (isAccessTokenExtendedTableExist() && resultSet.getString(17) != null &&
                             resultSet.getString(18) != null) {
                         extendedParams.put(resultSet.getString(17), resultSet.getString(18));
+                    }
+                    if (isConsentedTokenColumnEnabled) {
+                        int consentedTokenColIndex = resultSet.findColumn(CONSENTED_TOKEN_COLUMN_NAME);
+                        String consentedToken = resultSet.getString(consentedTokenColIndex);
+                        if (StringUtils.isNotEmpty(consentedToken)) {
+                            validationDataDO.setConsented(Boolean.parseBoolean(consentedToken));
+                        }
                     }
                     // For B2B users, the users tenant domain and user resident organization should be properly set.
                     if (!OAuthConstants.AuthorizedOrganization.NONE.equals(authorizedOrganization)) {

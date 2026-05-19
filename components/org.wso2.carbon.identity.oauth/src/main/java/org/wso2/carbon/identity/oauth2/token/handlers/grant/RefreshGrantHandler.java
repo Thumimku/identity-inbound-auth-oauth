@@ -67,6 +67,7 @@ import org.wso2.carbon.identity.oauth2.dto.OAuth2AccessTokenRespDTO;
 import org.wso2.carbon.identity.oauth2.dto.OAuthRevocationRequestDTO;
 import org.wso2.carbon.identity.oauth2.internal.OAuth2ServiceComponentHolder;
 import org.wso2.carbon.identity.oauth2.model.AccessTokenDO;
+import org.wso2.carbon.identity.oauth2.model.AccessTokenExtendedAttributes;
 import org.wso2.carbon.identity.oauth2.model.RefreshTokenValidationDataDO;
 import org.wso2.carbon.identity.oauth2.rar.util.AuthorizationDetailsUtils;
 import org.wso2.carbon.identity.oauth2.token.AccessTokenIssuer;
@@ -826,20 +827,21 @@ public class RefreshGrantHandler extends AbstractAuthorizationGrantHandler {
                                      String refreshToken, Timestamp timestamp,
                                      OAuthTokenReqMessageContext tokenReqMessageContext) {
 
+        long oldRefreshValidityInMillis = resolveOldRefreshValidity(validationBean, oAuthAppDO);
         Timestamp refreshTokenIssuedTime = null;
         long refreshTokenValidityPeriod = 0;
-        if (!isRenewRefreshToken(oAuthAppDO.getRenewRefreshTokenEnabled())) {
+        if (!OAuth2Util.isRenewRefreshToken(oAuthAppDO.getRenewRefreshTokenEnabled())) {
             // if refresh token renewal not enabled, we use existing one else we issue a new refresh token
             refreshToken = tokenReq.getRefreshToken();
             refreshTokenIssuedTime = validationBean.getIssuedTime();
-            refreshTokenValidityPeriod = validationBean.getValidityPeriodInMillis();
+            refreshTokenValidityPeriod = oldRefreshValidityInMillis;
         } else if (!oAuthAppDO.isExtendRenewedRefreshTokenExpiryTime()) {
             // If refresh token renewal enabled and extend token expiry disabled, set the old token issued and validity.
             refreshTokenIssuedTime = validationBean.getIssuedTime();
-            refreshTokenValidityPeriod = validationBean.getValidityPeriodInMillis();
+            refreshTokenValidityPeriod = oldRefreshValidityInMillis;
         } else if (tokenReq.getAccessTokenExtendedAttributes() != null &&
                 tokenReq.getAccessTokenExtendedAttributes().isExtendedToken()) {
-            refreshTokenValidityPeriod = validationBean.getValidityPeriodInMillis();
+            refreshTokenValidityPeriod = oldRefreshValidityInMillis;
         }
         if (refreshTokenIssuedTime == null) {
             refreshTokenIssuedTime = timestamp;
@@ -848,6 +850,27 @@ public class RefreshGrantHandler extends AbstractAuthorizationGrantHandler {
         accessTokenDO.setRefreshTokenIssuedTime(refreshTokenIssuedTime);
         accessTokenDO.setRefreshTokenValidityPeriodInMillis(
                 getRefreshTokenValidityPeriod(refreshTokenValidityPeriod, oAuthAppDO, tokenReqMessageContext));
+    }
+
+    private long resolveOldRefreshValidity(RefreshTokenValidationDataDO validationBean, OAuthAppDO oAuthAppDO) {
+
+        if (!oAuthAppDO.isGracefulRefreshTokenRotationEnabled()) {
+            return validationBean.getValidityPeriodInMillis();
+        }
+        AccessTokenExtendedAttributes attrs = validationBean.getAccessTokenExtendedAttributes();
+        if (attrs == null || attrs.getParameters() == null) {
+            return validationBean.getValidityPeriodInMillis();
+        }
+        String raw = attrs.getParameters()
+                .get(OAuthConstants.GracefulRefreshTokenRotation.GRACEFUL_REFRESH_TOKEN_ORIGINAL_VALIDITY_IN_MILLIS);
+        if (StringUtils.isBlank(raw)) {
+            return validationBean.getValidityPeriodInMillis();
+        }
+        try {
+            return Long.parseLong(raw);
+        } catch (NumberFormatException e) {
+            return validationBean.getValidityPeriodInMillis();
+        }
     }
 
     private long getRefreshTokenValidityPeriod(long refreshTokenValidityPeriod, OAuthAppDO oAuthAppDO,
@@ -989,22 +1012,6 @@ public class RefreshGrantHandler extends AbstractAuthorizationGrantHandler {
             if (shouldClearCacheEntry) {
                 AuthorizationGrantCache.getInstance().clearCacheEntryByToken(grantCacheKey);
             }
-        }
-    }
-
-    private boolean isRenewRefreshToken(String renewRefreshToken) {
-
-        if (StringUtils.isNotBlank(renewRefreshToken)) {
-            if (log.isDebugEnabled()) {
-                log.debug("Reading the Oauth application specific renew " +
-                        "refresh token value as " + renewRefreshToken + " from the IDN_OIDC_PROPERTY table");
-            }
-            return Boolean.parseBoolean(renewRefreshToken);
-        } else {
-            if (log.isDebugEnabled()) {
-                log.debug("Reading the global renew refresh token value from the identity.xml");
-            }
-            return OAuthServerConfiguration.getInstance().isRefreshTokenRenewalEnabled();
         }
     }
 
